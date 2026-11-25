@@ -1,0 +1,86 @@
+# ============================================================
+# SecureAssess Teacher Desktop — electron-builder config
+# ============================================================
+
+appId: com.secureassess.teacher
+productName: SecureAssess Teacher
+copyright: "Copyright © 2024 SecureAssess"
+
+# Security: apply @electron/fuses after packing
+afterPack: ./afterPack.js
+
+# Directories
+directories:
+  buildResources: assets
+  output: release
+
+# Files to pack
+files:
+  - dist/**/*
+  - "!dist/renderer/**/*.map"
+
+# Extra resources bundled at the root of the app
+extraResources:
+  # Bundled PyInstaller CCTV binary (built separately)
+  - from: "../../dist-pyinstaller/cctv-vision"
+    to: cctv-vision
+    filter:
+      - "**/*"
+  # Prisma engines for the target platform
+  - from: "../../node_modules/@prisma/engines"
+    to: prisma-engines
+    filter:
+      - "**/*.node"
+      - "**/*.so*"
+      - "**/*.dll"
+
+# Update configuration — points to the lab server /updates endpoint
+# Teachers can override serverUrl in settings; this is the fallback
+publish:
+  - provider: generic
+    url: https://updates.secureassess.local
+    useMultipleRangeRequest: false
+
+# Windows
+win:
+  target:
+    - target: nsis
+      arch: [x64]
+  icon: assets/icon.png
+  verifyUpdateCodeSignature: false
+  signAndEditExecutable: false
+
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: SecureAssess Teacher
+
+# Linux
+linux:
+  target:
+    - AppImage
+    - deb
+  icon: assets/icon.png
+  category: Education
+  maintainer: "SecureAssess <admin@secureassess.local>"
+  synopsis: Secure Examination & Proctoring Platform — Teacher Console
+
+deb:
+  depends:
+    - libgtk-3-0
+    - libnotify4
+    - libnss3
+    - libxss1
+    - libxtst6
+    - xdg-utils
+    - libatspi2.0-0
+    - libuuid1
+
+# macOS (optional future target)
+mac:
+  target:
+    - dmg
+  category: public.app-category.education
+  icon: assets/icon.icns

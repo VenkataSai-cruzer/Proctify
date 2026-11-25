@@ -1,0 +1,86 @@
+{
+  "name": "@secureassess/student-kiosk",
+  "version": "1.0.0",
+  "description": "SecureAssess Student Kiosk — Secure exam client with OS-level lockdown",
+  "author": "SecureAssess <admin@secureassess.local>",
+  "private": true,
+  "main": "dist/main/index.js",
+  "scripts": {
+    "dev": "concurrently \"vite\" \"wait-on http://localhost:5174 && electron .\"",
+    "dev:renderer": "vite --port 5174",
+    "build": "tsc --project tsconfig.main.json && vite build",
+    "package:win": "electron-builder --config electron-builder.yml --win",
+    "package:linux": "electron-builder --config electron-builder.yml --linux",
+    "package:all": "electron-builder --config electron-builder.yml --win --linux"
+  },
+  "dependencies": {
+    "@secureassess/shared": "workspace:*",
+    "@sentry/electron": "^5.4.0",
+    "clsx": "^2.1.1",
+    "framer-motion": "^11.2.13",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "react-router-dom": "^6.24.1",
+    "socket.io-client": "^4.7.5",
+    "zod": "^3.23.8",
+    "zustand": "^4.5.4"
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.9",
+    "@types/react": "^18.3.3",
+    "@types/react-dom": "^18.3.0",
+    "@vitejs/plugin-react": "^4.3.1",
+    "autoprefixer": "^10.4.19",
+    "clsx": "^2.1.1",
+    "concurrently": "^8.2.2",
+    "electron": "31.7.7",
+    "electron-builder": "^24.13.3",
+    "framer-motion": "^11.2.13",
+    "lucide-react": "^0.400.0",
+    "postcss": "^8.4.38",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "react-hot-toast": "^2.4.1",
+    "react-router-dom": "^6.24.1",
+    "tailwind-merge": "^2.4.0",
+    "tailwindcss": "^3.4.4",
+    "typescript": "^5.4.5",
+    "vite": "^5.3.1",
+    "vite-plugin-electron": "^0.28.7",
+    "wait-on": "^7.2.0",
+    "zustand": "^4.5.4"
+  },
+  "build": {
+    "appId": "com.secureassess.student",
+    "productName": "SecureAssess Student Kiosk",
+    "copyright": "Copyright © 2024 SecureAssess",
+    "files": [
+      "dist/**/*",
+      "node_modules/**/*"
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "assets/icon.ico"
+    },
+    "linux": {
+      "target": [
+        "AppImage",
+        "deb"
+      ],
+      "icon": "assets/icon.png",
+      "category": "Education"
+    },
+    "nsis": {
+      "oneClick": true,
+      "createDesktopShortcut": false,
+      "createStartMenuShortcut": true
+    }
+  }
+}

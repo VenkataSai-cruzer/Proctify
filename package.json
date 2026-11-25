@@ -1,0 +1,32 @@
+{
+  "name": "secureassess",
+  "version": "1.0.0",
+  "private": true,
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev:server": "yarn workspace @secureassess/server dev",
+    "dev:teacher": "yarn workspace @secureassess/teacher-desktop dev",
+    "dev:student": "yarn workspace @secureassess/student-kiosk dev",
+    "dev:cctv": "cd services/cctv-vision && python src/main.py",
+    "build:shared": "yarn workspace @secureassess/shared build",
+    "build:server": "yarn workspace @secureassess/server build",
+    "build:teacher": "yarn workspace @secureassess/teacher-desktop build",
+    "build:student": "yarn workspace @secureassess/student-kiosk build",
+    "db:generate": "yarn workspace @secureassess/server db:generate",
+    "db:migrate": "yarn workspace @secureassess/server db:migrate",
+    "db:studio": "yarn workspace @secureassess/server db:studio",
+    "test:e2e": "tsx scripts/verify-e2e.ts"
+  },
+  "devDependencies": {
+    "tsx": "^4.16.0",
+    "typescript": "^5.4.5"
+  },
+  "engines": {
+    "node": ">=20.0.0",
+    "yarn": ">=1.22.0"
+  },
+  "packageManager": "yarn@4.19.0"
+}

@@ -1,0 +1,271 @@
+// ============================================================
+// SecureAssess — Prisma SQLite Schema
+// ============================================================
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// ─── Teachers ────────────────────────────────────────────────
+
+model Teacher {
+  id           String   @id @default(uuid())
+  email        String   @unique
+  passwordHash String
+  name         String
+  avatarUrl    String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  exams        Exam[]
+  violations   ViolationEvent[] @relation("ForgiveTeacher")
+}
+
+// ─── Lab Machines ─────────────────────────────────────────────
+
+model LabMachine {
+  id            String   @id @default(uuid())
+  systemNo      String   @unique
+  machineName   String
+  macAddress    String   @unique
+  ipAddress     String
+  hardwareToken String   @unique
+  isActive      Boolean  @default(true)
+  row           Int      @default(0)
+  col           Int      @default(0)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  seatAllocations SeatAllocation[]
+  sessions        StudentSession[]
+}
+
+// ─── Exams ────────────────────────────────────────────────────
+
+model Exam {
+  id                   String     @id @default(uuid())
+  title                String
+  subject              String
+  durationMinutes      Int        @default(60)
+  status               String     @default("DRAFT")
+  passMarkPercent      Float      @default(50)
+  disqualifyThreshold  Int        @default(3)
+  strictSeatBinding    Boolean    @default(true)
+  lockdownMode         String     @default("KIOSK")
+  portablePackageHash  String?
+  createdAt            DateTime   @default(now())
+  updatedAt            DateTime   @updatedAt
+
+  teacher              Teacher    @relation(fields: [teacherId], references: [id])
+  teacherId            String
+
+  questions            MCQQuestion[]
+  rosterEntries        RosterEntry[]
+  seatAllocations      SeatAllocation[]
+  sessions             StudentSession[]
+  cctvCalibrations     CCTVCalibration[]
+  certificates         Certificate[]
+}
+
+// ─── MCQ Questions ────────────────────────────────────────────
+
+model MCQQuestion {
+  id           String   @id @default(uuid())
+  questionText String
+  optionsJson  String   // JSON: MCQOption[] — options only, NO correctIndex sent to client
+  correctIndex Int      // server-side only, never serialised to student
+  difficulty   String
+  topicTag     String   @default("")
+  points       Int      @default(10)
+  orderIndex   Int      @default(0)
+  createdAt    DateTime @default(now())
+
+  exam         Exam     @relation(fields: [examId], references: [id], onDelete: Cascade)
+  examId       String
+
+  answers      AnswerRecord[]
+}
+
+// ─── Roster ───────────────────────────────────────────────────
+
+model RosterEntry {
+  id             String   @id @default(uuid())
+  fullName       String
+  registerNumber String
+  year           String
+  createdAt      DateTime @default(now())
+
+  exam           Exam     @relation(fields: [examId], references: [id], onDelete: Cascade)
+  examId         String
+
+  seatAllocation SeatAllocation?
+  session        StudentSession?
+  certificate    Certificate?
+
+  @@unique([examId, registerNumber])
+}
+
+// ─── Seat Allocations ─────────────────────────────────────────
+
+model SeatAllocation {
+  id        String   @id @default(uuid())
+  createdAt DateTime @default(now())
+
+  exam      Exam       @relation(fields: [examId], references: [id], onDelete: Cascade)
+  examId    String
+
+  roster    RosterEntry @relation(fields: [rosterId], references: [id], onDelete: Cascade)
+  rosterId  String      @unique
+
+  machine   LabMachine  @relation(fields: [systemNo], references: [systemNo])
+  systemNo  String
+
+  @@unique([examId, systemNo])
+}
+
+// ─── CCTV Calibration ─────────────────────────────────────────
+
+model CCTVCalibration {
+  id           String   @id @default(uuid())
+  cameraSource String
+  frameWidth   Int
+  frameHeight  Int
+  zonesJson    String
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  exam         Exam     @relation(fields: [examId], references: [id], onDelete: Cascade)
+  examId       String   @unique
+}
+
+// ─── Student Sessions ─────────────────────────────────────────
+
+model StudentSession {
+  id                     String    @id @default(uuid())
+  clientMode             String    @default("BROWSER")
+  status                 String    @default("WAITING")
+  currentDifficulty      String    @default("EASY")
+  currentScore           Int       @default(0)
+  finalScore             Int?      // set after server-side reconciliation at exam end
+  highestTierReached     String    @default("EASY")
+  consecutiveCorrect     Int       @default(0)
+  violationCount         Int       @default(0)
+  violationDeduction     Int       @default(0) // points deducted from unforgiven violations
+  startedAt              DateTime?
+  submittedAt            DateTime?
+  timeExtensionMinutes   Int       @default(0)
+  lastHeartbeatAt        DateTime  @default(now())
+  lastSeq                Int       @default(0)  // monotonic seq for anti-replay
+  createdAt              DateTime  @default(now())
+  updatedAt              DateTime  @updatedAt
+
+  exam                   Exam          @relation(fields: [examId], references: [id])
+  examId                 String
+
+  roster                 RosterEntry   @relation(fields: [rosterId], references: [id])
+  rosterId               String        @unique
+
+  machine                LabMachine    @relation(fields: [systemNo], references: [systemNo])
+  systemNo               String
+
+  answers                AnswerRecord[]
+  violations             ViolationEvent[]
+  certificate            Certificate?
+}
+
+// ─── Answer Records ───────────────────────────────────────────
+
+model AnswerRecord {
+  id            String   @id @default(uuid())
+  chosenIndex   Int
+  seq           Int      @default(0)   // monotonic sequence number from client
+  timeSpentMs   Int      @default(0)   // ms student spent on this question
+  packetHmac    String   @default("") // HMAC-SHA256 of (sessionId|questionId|chosenIndex|seq)
+  // These are set server-side during deferred reconciliation — never from client
+  isCorrect     Boolean  @default(false)
+  difficulty    String
+  pointsAwarded Int      @default(0)
+  answeredAt    DateTime @default(now())
+
+  session       StudentSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  sessionId     String
+
+  question      MCQQuestion    @relation(fields: [questionId], references: [id])
+  questionId    String
+
+  @@unique([sessionId, questionId])
+}
+
+// ─── Violation Events (hash-chained audit log) ────────────────
+
+model ViolationEvent {
+  id             String   @id @default(uuid())
+  systemNo       String
+  violationType  String
+  source         String   @default("CLIENT")
+  confidence     Float    @default(1.0)
+  snapshotBase64 String?
+  metadataJson   String?
+  timestamp      DateTime @default(now())
+  forgiven       Boolean  @default(false)
+  forgivenAt     DateTime?
+  // Hash-chain fields for tamper-evident audit log
+  prevHash       String   @default("0000000000000000") // hash of previous event in session chain
+  recordHash     String   @default("")                 // SHA-256(prevHash|id|sessionId|violationType|timestamp)
+
+  session        StudentSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  sessionId      String
+
+  forgivenBy     Teacher?  @relation("ForgiveTeacher", fields: [forgivenById], references: [id])
+  forgivenById   String?
+}
+
+// ─── Certificates ─────────────────────────────────────────────
+
+model Certificate {
+  id                 String   @id @default(uuid())
+  studentName        String
+  registerNumber     String
+  year               String
+  examTitle          String
+  subject            String
+  score              Int
+  totalPossible      Int
+  percentile         Float    @default(0)
+  highestTierReached String
+  status             String   @default("VERIFIED")
+  verificationHash   String   @unique  // HMAC-SHA256 signed payload
+  issuedAt           DateTime @default(now())
+  examDate           DateTime
+
+  exam               Exam           @relation(fields: [examId], references: [id])
+  examId             String
+
+  session            StudentSession @relation(fields: [sessionId], references: [id])
+  sessionId          String         @unique
+
+  roster             RosterEntry    @relation(fields: [rosterId], references: [id])
+  rosterId           String         @unique
+}
+
+// ─── App Settings ─────────────────────────────────────────────
+
+model AppSetting {
+  key       String   @id
+  value     String
+  updatedAt DateTime @updatedAt
+}
+
+// ─── Allowed Subnets ─────────────────────────────────────────
+
+model AllowedSubnet {
+  id        String   @id @default(uuid())
+  cidr      String   @unique
+  label     String   @default("")
+  createdAt DateTime @default(now())
+}

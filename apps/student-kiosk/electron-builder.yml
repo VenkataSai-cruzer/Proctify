@@ -1,0 +1,50 @@
+# ============================================================
+# SecureAssess Student Kiosk — electron-builder config
+# ============================================================
+
+appId: com.secureassess.student
+productName: SecureAssess Student Kiosk
+copyright: "Copyright © 2024 SecureAssess"
+
+directories:
+  buildResources: assets
+  output: release
+
+files:
+  - dist/**/*
+  - "!dist/renderer/**/*.map"
+
+publish:
+  - provider: generic
+    url: https://updates.secureassess.local
+    useMultipleRangeRequest: false
+
+win:
+  target:
+    - target: nsis
+      arch: [x64]
+  icon: assets/icon.png
+  verifyUpdateCodeSignature: false
+  signAndEditExecutable: false
+
+nsis:
+  oneClick: true
+  createDesktopShortcut: false
+  createStartMenuShortcut: true
+  shortcutName: SecureAssess Kiosk
+
+linux:
+  target:
+    - AppImage
+    - deb
+  icon: assets/icon.png
+  category: Education
+
+deb:
+  depends:
+    - libgtk-3-0
+    - libnss3
+    - libxss1
+    - libxtst6
+    - xdg-utils
+    - libatspi2.0-0

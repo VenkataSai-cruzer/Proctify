@@ -1,0 +1,14 @@
+# ── Core ───────────────────────────────────────────────────────
+opencv-python-headless==4.10.0.84
+mediapipe==0.10.14
+numpy==1.26.4
+
+# ── Socket.IO client (connects back to Node server) ────────────
+python-socketio[asyncio_client]==5.11.3
+aiohttp==3.9.5
+
+# ── Image encoding ─────────────────────────────────────────────
+Pillow==10.4.0
+
+# ── Config & utilities ─────────────────────────────────────────
+python-dotenv==1.0.1
