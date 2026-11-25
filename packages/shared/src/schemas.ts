@@ -26,9 +26,11 @@ export const LoginSchema = z.object({
 });
 
 export const RegisterTeacherSchema = z.object({
-  name: z.string().min(2).max(100),
-  email: z.string().email(),
-  password: z.string().min(8).max(128),
+  name:              z.string().min(2).max(100),
+  email:             z.string().email(),
+  password:          z.string().min(8).max(128),
+  registrationPin:   z.string().optional(),   // required after first-run
+  newPin:            z.string().min(4).max(64).optional(), // first-run Lab Host PIN setup
 });
 
 // ─── Exam ─────────────────────────────────────────────────────

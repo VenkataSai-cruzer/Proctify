@@ -35,6 +35,7 @@ export interface Teacher {
   email: string;
   name: string;
   avatarUrl?: string;
+  isLabHost: boolean;
   createdAt: string;
 }
 

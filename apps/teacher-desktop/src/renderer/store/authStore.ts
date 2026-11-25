@@ -5,6 +5,7 @@ interface Teacher {
   id: string;
   name: string;
   email: string;
+  isLabHost: boolean;
 }
 
 interface AuthState {

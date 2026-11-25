@@ -19,6 +19,7 @@ model Teacher {
   passwordHash String
   name         String
   avatarUrl    String?
+  isLabHost    Boolean  @default(false) // first registered teacher becomes Lab Host
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 

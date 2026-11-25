@@ -1,65 +1,61 @@
-# ── Dependencies ─────────────────────────────────────────────
-node_modules/
-
-# ── Build outputs ─────────────────────────────────────────────
-dist/
-build/
-out/
-
-# ── Electron packaging ────────────────────────────────────────
-release/
-dist-pyinstaller/
-*.AppImage
-*.deb
-*.snap
-
-# Windows installers — never committed
-apps/teacher-desktop/release/
-apps/student-kiosk/release/
-
-# ── Secrets & environment ─────────────────────────────────────
+# ── Secrets & Credentials ─────────────────────────────────────
 .env
-.env.local
-*.local
+.env.*
+!.env.example
 encrypted-secrets.json
+*.pem
+*.key
+*.pfx
+*.p12
+*.cert
 
-# ── Databases ────────────────────────────────────────────────
+# ── Local Databases, Logs & Exports ──────────────────────────
 *.db
 *.db-journal
 *.db-shm
 *.db-wal
-# Keep .env.example files (they have no real secrets)
-!.env.example
-
-# ── Prisma migrations (generated) ────────────────────────────
-# Keep migration files for reproducible deployments
-# prisma/migrations/  ← intentionally not ignored
-
-# ── Logs ─────────────────────────────────────────────────────
-*.log
+*.sqlite
+*.sqlite3
+tmp-e2e-test*
 logs/
-
-# ── Test artifacts ────────────────────────────────────────────
-apps/server/tmp-e2e-test*
 exports/
+backups/
+sentry-queue/
+
+# ── Build Outputs ─────────────────────────────────────────────
+node_modules/
+dist/
+build/
+out/
+release/
+dist-pyinstaller/
+
+# ── Electron Packaging Artifacts ──────────────────────────────
+*.AppImage
+*.deb
+*.snap
+apps/teacher-desktop/release/
+apps/student-kiosk/release/
 
 # ── Python ────────────────────────────────────────────────────
+.venv/
+venv/
 __pycache__/
 *.pyc
 *.pyo
-.venv/
-venv/
-services/cctv-vision/models/*.task
-services/cctv-vision/models/*.tflite
 services/cctv-vision/build/
 services/cctv-vision/dist/
+services/cctv-vision/models/*.task
+services/cctv-vision/models/*.tflite
+
+# ── Logs ──────────────────────────────────────────────────────
+*.log
 
 # ── Yarn Berry ────────────────────────────────────────────────
 .yarn/cache
 .yarn/unplugged
 .yarn/build-state.yml
 .yarn/install-state.gz
-# Keep .yarn/releases (the berry binary itself)
 !.yarn/releases
 
 # ── OS ───────────────────────────────────────────────────────

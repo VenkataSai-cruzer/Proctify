@@ -6,12 +6,14 @@ import { useState, useEffect } from "react";
 import { AppShell } from "../components/layout/AppShell";
 import { Card, CardHeader } from "../components/ui/Card";
 import { Button } from "../components/ui/Button";
+import { Modal } from "../components/ui/Modal";
 import { useAuthStore } from "../store/authStore";
+import { api } from "../lib/api";
 import { cn } from "../lib/utils";
 import toast from "react-hot-toast";
 
 export default function SettingsPage() {
-  const { serverUrl, labMode, setServerUrl, setLabMode } = useAuthStore();
+  const { serverUrl, labMode, setServerUrl, setLabMode, teacher } = useAuthStore();
   const [server, setServer] = useState(serverUrl);
   const [checking, setChecking] = useState(false);
   const [healthy, setHealthy]   = useState<boolean | null>(null);
@@ -19,9 +21,31 @@ export default function SettingsPage() {
   const [checkingUpdate, setCheckingUpdate] = useState(false);
   const [exportingDx, setExportingDx] = useState(false);
 
+  // PIN change modal state
+  const [pinModalOpen, setPinModalOpen]   = useState(false);
+  const [currentPin, setCurrentPin]       = useState("");
+  const [newPinA, setNewPinA]             = useState("");
+  const [newPinB, setNewPinB]             = useState("");
+  const [changingPin, setChangingPin]     = useState(false);
+
   useEffect(() => {
     window.electronAPI?.getUserDataPath().then((p) => setUserDataPath(String(p)));
   }, []);
+
+  const handleChangePIN = async () => {
+    if (!currentPin || !newPinA || !newPinB) { toast.error("All PIN fields are required"); return; }
+    if (newPinA.length < 4) { toast.error("New PIN must be at least 4 characters"); return; }
+    if (newPinA !== newPinB) { toast.error("New PINs do not match"); return; }
+    setChangingPin(true);
+    try {
+      await api.post("/api/auth/change-pin", { currentPin, newPin: newPinA });
+      toast.success("Faculty registration PIN updated");
+      setPinModalOpen(false);
+      setCurrentPin(""); setNewPinA(""); setNewPinB("");
+    } catch (err: unknown) {
+      toast.error((err as Error).message ?? "Failed to change PIN");
+    } finally { setChangingPin(false); }
+  };
 
   const handleCheckHealth = async () => {
     setChecking(true);
@@ -110,6 +134,26 @@ export default function SettingsPage() {
           </div>
         </Card>
 
+        {/* Faculty Registration PIN (Lab Host only) */}
+        {teacher?.isLabHost && (
+          <Card>
+            <CardHeader
+              title="Faculty Registration PIN"
+              subtitle="Controls who can create new teacher accounts on this server"
+            />
+            <div className="p-4 space-y-2">
+              <p className="text-xs text-slate-400 leading-relaxed">
+                This PIN is required when any new teacher registers.
+                It prevents students from creating teacher accounts on shared lab PCs.
+                Only the Lab Host (you) can change it.
+              </p>
+              <Button size="sm" variant="secondary" onClick={() => setPinModalOpen(true)}>
+                🔑 Change Faculty Registration PIN
+              </Button>
+            </div>
+          </Card>
+        )}
+
         {/* Updates */}
         {window.electronAPI && (
           <Card>
@@ -177,5 +221,32 @@ export default function SettingsPage() {
         </Card>
       </div>
     </AppShell>
+
+    {/* PIN Change Modal */}
+    <Modal open={pinModalOpen} onClose={() => { setPinModalOpen(false); setCurrentPin(""); setNewPinA(""); setNewPinB(""); }}
+      title="Change Faculty Registration PIN" size="sm">
+      <div className="space-y-3">
+        <p className="text-xs text-slate-400">
+          After changing, give the new PIN to faculty members who need to create accounts.
+        </p>
+        {[
+          { label: "Current PIN", value: currentPin, setter: setCurrentPin, placeholder: "••••" },
+          { label: "New PIN (min 4 chars)", value: newPinA, setter: setNewPinA, placeholder: "New PIN" },
+          { label: "Confirm New PIN", value: newPinB, setter: setNewPinB, placeholder: "Repeat new PIN" },
+        ].map(({ label, value, setter, placeholder }) => (
+          <div key={label}>
+            <label className="block text-xs font-medium text-slate-400 mb-1">{label}</label>
+            <input type="password" value={value} onChange={(e) => setter(e.target.value)}
+              placeholder={placeholder} autoComplete="off"
+              className="w-full bg-[#0B1120] border border-[#374151] rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:ring-1 focus:ring-cobalt-500" />
+          </div>
+        ))}
+        <div className="flex justify-end gap-2 pt-2">
+          <Button variant="secondary" size="sm" onClick={() => setPinModalOpen(false)}>Cancel</Button>
+          <Button size="sm" loading={changingPin} onClick={handleChangePIN}>Update PIN</Button>
+        </div>
+      </div>
+    </Modal>
+    </>
   );
 }
