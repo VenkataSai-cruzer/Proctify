@@ -1,0 +1,338 @@
+# ============================================================
+# SecureAssess — Automated Cross-Platform Release Pipeline
+# ============================================================
+#
+# Triggers on any push of a semver tag (v*.*.*).
+# Jobs:
+#   build-python  — PyInstaller CCTV bundle on ubuntu-latest
+#   release-win   — Windows .exe installer (windows-latest)
+#   release-linux — Linux .AppImage + .deb (ubuntu-latest)
+#
+# All three jobs upload artifacts to the same GitHub Release,
+# which electron-updater uses to serve latest.yml.
+#
+# Required secrets (Settings → Secrets → Actions):
+#   GH_TOKEN  — Personal Access Token with repo+write:packages scope
+#               OR use the auto-generated GITHUB_TOKEN (default).
+# ============================================================
+
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+permissions:
+  contents: write   # required to create GitHub releases and upload assets
+
+env:
+  NODE_VERSION: "20"
+  PYTHON_VERSION: "3.11"
+
+# ── Job 1: Build PyInstaller CCTV bundle ──────────────────────
+jobs:
+  build-python:
+    name: Build CCTV Vision Bundle (Python 3.11)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python ${{ env.PYTHON_VERSION }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install CCTV dependencies
+        run: |
+          cd services/cctv-vision
+          pip install --upgrade pip
+          pip install \
+            opencv-python-headless==4.10.0.84 \
+            mediapipe==0.10.14 \
+            numpy==1.26.4 \
+            "python-socketio[asyncio_client]==5.11.3" \
+            aiohttp==3.9.5 \
+            Pillow==10.4.0 \
+            python-dotenv==1.0.1 \
+            pyinstaller
+
+      - name: Download MediaPipe face_landmarker model
+        run: |
+          mkdir -p services/cctv-vision/models
+          curl -L \
+            "https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task" \
+            -o services/cctv-vision/models/face_landmarker.task
+
+      - name: Build PyInstaller bundle
+        run: |
+          cd services/cctv-vision
+          pyinstaller cctv_vision.spec --clean --noconfirm
+          # Verify output
+          ls -lh ../../dist-pyinstaller/cctv-vision/ | head -5
+
+      - name: Upload CCTV bundle artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: cctv-vision-linux
+          path: dist-pyinstaller/cctv-vision/
+          retention-days: 1
+
+# ── Job 2: Windows installer (.exe) ───────────────────────────
+  release-win:
+    name: Windows Installer (.exe)
+    needs: build-python
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Enable Corepack (Yarn Berry)
+        run: corepack enable
+
+      - name: Install dependencies
+        run: yarn install --immutable
+
+      - name: Build shared package
+        run: yarn workspace @secureassess/shared build
+
+      - name: Generate Prisma client
+        run: yarn workspace @secureassess/server db:generate
+
+      # Windows needs the Windows cctv binary — build it here since
+      # Job 1 produced a Linux binary. Use the Python 3.11 for Windows.
+      - name: Set up Python ${{ env.PYTHON_VERSION }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install CCTV dependencies (Windows)
+        shell: pwsh
+        run: |
+          cd services/cctv-vision
+          pip install --upgrade pip
+          pip install `
+            opencv-python==4.10.0.84 `
+            "python-socketio[asyncio_client]==5.11.3" `
+            aiohttp==3.9.5 `
+            Pillow==10.4.0 `
+            python-dotenv==1.0.1 `
+            numpy==1.26.4 `
+            pyinstaller
+          # mediapipe wheels available for 3.11 on Windows
+          pip install mediapipe==0.10.14 --quiet || echo "mediapipe not available, continuing with Haar fallback"
+
+      - name: Download MediaPipe model (Windows)
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path services/cctv-vision/models | Out-Null
+          $url = "https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task"
+          $dest = "services/cctv-vision/models/face_landmarker.task"
+          if (-not (Test-Path $dest)) {
+            Invoke-WebRequest -Uri $url -OutFile $dest
+          }
+
+      - name: Build CCTV bundle (Windows)
+        shell: pwsh
+        run: |
+          cd services/cctv-vision
+          python -m PyInstaller cctv_vision.spec --clean --noconfirm
+          $exe = "..\..\dist-pyinstaller\cctv-vision\cctv-vision.exe"
+          if (Test-Path $exe) {
+            $sz = [math]::Round((Get-Item $exe).Length / 1MB, 1)
+            Write-Host "cctv-vision.exe: $sz MB"
+          } else {
+            Write-Host "Binary not found at expected path, checking dist/"
+            Get-ChildItem dist -Recurse -Filter "*.exe" | Select-Object FullName
+          }
+
+      # If the spec put the binary in services/cctv-vision/dist instead of dist-pyinstaller
+      - name: Normalize CCTV binary location
+        shell: pwsh
+        run: |
+          $src = "services\cctv-vision\dist\cctv-vision"
+          $dst = "dist-pyinstaller\cctv-vision"
+          if ((Test-Path $src) -and (-not (Test-Path "$dst\cctv-vision.exe"))) {
+            New-Item -ItemType Directory -Force -Path $dst | Out-Null
+            Copy-Item "$src\*" $dst -Recurse -Force
+            Write-Host "Copied CCTV bundle to $dst"
+          } elseif (Test-Path "$dst\cctv-vision.exe") {
+            $sz = [math]::Round((Get-Item "$dst\cctv-vision.exe").Length / 1MB, 1)
+            Write-Host "CCTV binary ready at $dst ($sz MB)"
+          }
+
+      - name: Compile Electron main processes
+        run: |
+          yarn workspace @secureassess/teacher-desktop tsc --project tsconfig.main.json
+          yarn workspace @secureassess/student-kiosk   tsc --project tsconfig.main.json
+
+      - name: Build renderer bundles
+        run: |
+          yarn workspace @secureassess/teacher-desktop vite build
+          yarn workspace @secureassess/student-kiosk   vite build
+
+      - name: Run E2E tests
+        env:
+          JWT_SECRET: "ci-test-secret-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+          CCTV_SERVICE_SECRET: "ci-cctv-secret"
+          NODE_ENV: "test"
+        run: yarn test:e2e
+
+      - name: Package — Teacher Desktop (Windows)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CSC_IDENTITY_AUTO_DISCOVERY: "false"
+          ELECTRON_OVERRIDE_DIST_PATH: ${{ github.workspace }}/node_modules/electron/dist
+        run: yarn workspace @secureassess/teacher-desktop package:win
+
+      - name: Package — Student Kiosk (Windows)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CSC_IDENTITY_AUTO_DISCOVERY: "false"
+          ELECTRON_OVERRIDE_DIST_PATH: ${{ github.workspace }}/node_modules/electron/dist
+        run: yarn workspace @secureassess/student-kiosk package:win
+
+      - name: Upload Windows artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-installers
+          path: |
+            apps/teacher-desktop/release/*.exe
+            apps/teacher-desktop/release/*.exe.blockmap
+            apps/teacher-desktop/release/latest.yml
+            apps/student-kiosk/release/*.exe
+            apps/student-kiosk/release/*.exe.blockmap
+          retention-days: 7
+
+# ── Job 3: Linux installers (.AppImage + .deb) ───────────────
+  release-linux:
+    name: Linux Installers (.AppImage + .deb)
+    needs: build-python
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Enable Corepack (Yarn Berry)
+        run: corepack enable
+
+      - name: Install system dependencies for electron-builder
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y --no-install-recommends \
+            libgtk-3-dev libnss3 libxss1 libxtst6 \
+            xvfb rpm fakeroot dpkg
+
+      - name: Install Node dependencies
+        run: yarn install --immutable
+
+      - name: Build shared package
+        run: yarn workspace @secureassess/shared build
+
+      - name: Generate Prisma client
+        run: yarn workspace @secureassess/server db:generate
+
+      - name: Download CCTV bundle artifact (Linux)
+        uses: actions/download-artifact@v4
+        with:
+          name: cctv-vision-linux
+          path: dist-pyinstaller/cctv-vision/
+
+      - name: Make CCTV binary executable
+        run: chmod +x dist-pyinstaller/cctv-vision/cctv-vision 2>/dev/null || true
+
+      - name: Compile Electron main processes
+        run: |
+          yarn workspace @secureassess/teacher-desktop tsc --project tsconfig.main.json
+          yarn workspace @secureassess/student-kiosk   tsc --project tsconfig.main.json
+
+      - name: Build renderer bundles
+        run: |
+          yarn workspace @secureassess/teacher-desktop vite build
+          yarn workspace @secureassess/student-kiosk   vite build
+
+      - name: Run E2E tests
+        env:
+          JWT_SECRET: "ci-test-secret-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+          CCTV_SERVICE_SECRET: "ci-cctv-secret"
+          NODE_ENV: "test"
+        run: yarn test:e2e
+
+      - name: Package — Teacher Desktop (Linux)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CSC_IDENTITY_AUTO_DISCOVERY: "false"
+        run: yarn workspace @secureassess/teacher-desktop package:linux
+
+      - name: Package — Student Kiosk (Linux)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CSC_IDENTITY_AUTO_DISCOVERY: "false"
+        run: yarn workspace @secureassess/student-kiosk package:linux
+
+      - name: Upload Linux artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-installers
+          path: |
+            apps/teacher-desktop/release/*.AppImage
+            apps/teacher-desktop/release/*.deb
+            apps/teacher-desktop/release/latest-linux.yml
+            apps/student-kiosk/release/*.AppImage
+            apps/student-kiosk/release/*.deb
+          retention-days: 7
+
+# ── Job 4: Publish GitHub Release ─────────────────────────────
+  publish-release:
+    name: Publish GitHub Release
+    needs: [release-win, release-linux]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download all installer artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-assets/
+
+      - name: List release assets
+        run: find release-assets/ -type f | sort
+
+      - name: Create GitHub Release and upload assets
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: "SecureAssess ${{ github.ref_name }}"
+          body: |
+            ## SecureAssess ${{ github.ref_name }}
+
+            ### Downloads
+
+            | Platform | File | Description |
+            |---|---|---|
+            | Windows | `SecureAssess Teacher Setup *.exe` | Teacher Console installer (NSIS) |
+            | Windows | `SecureAssess Student Kiosk Setup *.exe` | Student Kiosk installer (silent NSIS) |
+            | Linux | `SecureAssess Teacher-*.AppImage` | Teacher Console portable |
+            | Linux | `secureassess-teacher_*.deb` | Teacher Console Debian package |
+            | Linux | `SecureAssess Student Kiosk-*.AppImage` | Student Kiosk portable |
+
+            ### Auto-update
+            The Teacher Desktop app checks this release page for updates via `electron-updater`.
+            `latest.yml` and `latest-linux.yml` are attached for the auto-updater feed.
+
+            ### Changelog
+            See [CHANGELOG.md](https://github.com/VenkataSai-cruzer/Proctify/blob/main/CHANGELOG.md) for details.
+          draft: false
+          prerelease: false
+          files: |
+            release-assets/windows-installers/*
+            release-assets/linux-installers/*
+          token: ${{ secrets.GITHUB_TOKEN }}

@@ -14,9 +14,12 @@ files:
   - dist/**/*
   - "!dist/renderer/**/*.map"
 
+# ── LAN update server (student kiosk stays on local network) ──
+# The kiosk checks the lab server for updates, not GitHub,
+# because lab PCs may have no internet access during exams.
 publish:
   - provider: generic
-    url: https://updates.secureassess.local
+    url: http://secureassess-lab.local:3000/updates/student
     useMultipleRangeRequest: false
 
 win:

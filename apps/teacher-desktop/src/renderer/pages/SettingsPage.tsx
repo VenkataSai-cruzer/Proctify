@@ -67,6 +67,7 @@ export default function SettingsPage() {
   };
 
   return (
+    <>
     <AppShell title="Settings">
       <div className="p-5 space-y-5 max-w-2xl">
         {/* Connection */}

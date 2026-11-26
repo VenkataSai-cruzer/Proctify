@@ -155,7 +155,8 @@ saexamRouter.post("/import", upload.single("bundle") as unknown as RequestHandle
   const bundleHash = crypto
     .createHash("sha256").update(req.file.buffer).digest("hex");
 
-  await prisma.$transaction(async (tx: typeof prisma) => {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  await prisma.$transaction(async (tx: any) => {
     // Upsert exam
     const importedExam = await tx.exam.upsert({
       where: { id: examData.id },

@@ -21,7 +21,7 @@ files:
 
 # Extra resources bundled at the root of the app
 extraResources:
-  # Bundled PyInstaller CCTV binary (built separately)
+  # Bundled PyInstaller CCTV binary — built by CI before electron-builder runs
   - from: "../../dist-pyinstaller/cctv-vision"
     to: cctv-vision
     filter:
@@ -34,12 +34,15 @@ extraResources:
       - "**/*.so*"
       - "**/*.dll"
 
-# Update configuration — points to the lab server /updates endpoint
-# Teachers can override serverUrl in settings; this is the fallback
+# ── GitHub Releases (teacher desktop) ─────────────────────────
+# electron-updater fetches latest.yml from the GitHub release page.
+# The in-app auto-updater in src/main/autoUpdater.ts will fall back
+# to the LAN server (/updates) if the GitHub URL is overridden in settings.
 publish:
-  - provider: generic
-    url: https://updates.secureassess.local
-    useMultipleRangeRequest: false
+  - provider: github
+    owner: VenkataSai-cruzer
+    repo: Proctify
+    releaseType: release
 
 # Windows
 win:
