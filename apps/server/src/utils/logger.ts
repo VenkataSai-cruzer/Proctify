@@ -1,4 +1,37 @@
 import winston from "winston";
+import path from "path";
+import fs from "fs";
+
+// LOG_DIR lets the desktop app keep server logs inside userData instead of
+// the (often read-only) install directory.
+const logDir = process.env.LOG_DIR ? path.resolve(process.env.LOG_DIR) : path.resolve("logs");
+
+try {
+  fs.mkdirSync(logDir, { recursive: true });
+} catch {
+  /* best effort — console transport still works */
+}
+
+const fileTransports = () => {
+  try {
+    fs.accessSync(logDir, fs.constants.W_OK);
+    return [
+      new winston.transports.File({
+        filename: path.join(logDir, "error.log"),
+        level: "error",
+        maxsize: 5_242_880,
+        maxFiles: 3,
+      }),
+      new winston.transports.File({
+        filename: path.join(logDir, "combined.log"),
+        maxsize: 10_485_760,
+        maxFiles: 5,
+      }),
+    ];
+  } catch {
+    return [];
+  }
+};
 
 export const logger = winston.createLogger({
   level: process.env.NODE_ENV === "production" ? "info" : "debug",
@@ -15,18 +48,5 @@ export const logger = winston.createLogger({
           })
         )
   ),
-  transports: [
-    new winston.transports.Console(),
-    new winston.transports.File({
-      filename: "logs/error.log",
-      level: "error",
-      maxsize: 5_242_880,
-      maxFiles: 3,
-    }),
-    new winston.transports.File({
-      filename: "logs/combined.log",
-      maxsize: 10_485_760,
-      maxFiles: 5,
-    }),
-  ],
+  transports: [new winston.transports.Console(), ...fileTransports()],
 });

@@ -30,6 +30,14 @@ out/
 release/
 dist-pyinstaller/
 
+# Generated app icons are electron-builder inputs — keep them tracked
+!apps/teacher-desktop/build/
+!apps/teacher-desktop/build/icon.ico
+!apps/teacher-desktop/build/icon.png
+!apps/student-kiosk/build/
+!apps/student-kiosk/build/icon.ico
+!apps/student-kiosk/build/icon.png
+
 # ── Electron Packaging Artifacts ──────────────────────────────
 *.AppImage
 *.deb

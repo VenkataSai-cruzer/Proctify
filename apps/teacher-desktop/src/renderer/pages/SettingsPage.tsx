@@ -20,6 +20,9 @@ export default function SettingsPage() {
   const [userDataPath, setUserDataPath] = useState("");
   const [checkingUpdate, setCheckingUpdate] = useState(false);
   const [exportingDx, setExportingDx] = useState(false);
+  const [updateStatus, setUpdateStatus] = useState<{
+    stage: string; channel?: string; version?: string; percent?: number; message?: string;
+  } | null>(null);
 
   // PIN change modal state
   const [pinModalOpen, setPinModalOpen]   = useState(false);
@@ -30,6 +33,13 @@ export default function SettingsPage() {
 
   useEffect(() => {
     window.electronAPI?.getUserDataPath().then((p) => setUserDataPath(String(p)));
+  }, []);
+
+  // Live auto-updater status (teacher release channel)
+  useEffect(() => {
+    if (!window.electronAPI) return;
+    window.electronAPI.onUpdaterStatus((data) => setUpdateStatus(data));
+    return () => window.electronAPI?.removeAllListeners("updater:status");
   }, []);
 
   const handleChangePIN = async () => {
@@ -165,20 +175,67 @@ export default function SettingsPage() {
         {/* Updates */}
         {window.electronAPI && (
           <Card>
-            <CardHeader title="Application Updates" />
-            <div className="p-4 flex gap-2">
-              <Button
-                size="sm" variant="secondary"
-                loading={checkingUpdate}
-                onClick={async () => {
-                  setCheckingUpdate(true);
-                  await window.electronAPI?.checkForUpdates().catch(() => null);
-                  setCheckingUpdate(false);
-                  toast.success("Update check triggered");
-                }}
-              >
-                Check for Updates
-              </Button>
+            <CardHeader
+              title="Application Updates"
+              subtitle="Release channel: teacher (independent of the student kiosk)"
+            />
+            <div className="p-4 space-y-3">
+              <p className="text-xs text-slate-400">
+                {updateStatus?.stage === "checking"      && "Checking for updates…"}
+                {updateStatus?.stage === "available"     && `Version ${updateStatus.version} is available.`}
+                {updateStatus?.stage === "not-available" && `You are up to date (v${updateStatus.version ?? "—"}).`}
+                {updateStatus?.stage === "progress"      && `Downloading… ${updateStatus.percent ?? 0}%`}
+                {updateStatus?.stage === "downloaded"    && `Version ${updateStatus.version} is downloaded and ready.`}
+                {updateStatus?.stage === "error"         && `Update error: ${updateStatus.message ?? "unknown"}`}
+                {updateStatus?.stage === "disabled"      && (updateStatus.message ?? "Updates are disabled in this build.")}
+                {!updateStatus && "Check for updates from the Proctify release channel."}
+              </p>
+
+              {updateStatus?.stage === "progress" && (
+                <div className="h-1.5 w-full rounded-full bg-[#1F2937] overflow-hidden">
+                  <div
+                    className="h-full bg-cobalt-500 transition-all"
+                    style={{ width: `${Math.min(100, Math.max(0, updateStatus.percent ?? 0))}%` }}
+                  />
+                </div>
+              )}
+
+              <div className="flex flex-wrap gap-2">
+                <Button
+                  size="sm" variant="secondary"
+                  loading={checkingUpdate}
+                  onClick={async () => {
+                    setCheckingUpdate(true);
+                    const result = await window.electronAPI?.checkForUpdates().catch(() => null);
+                    setCheckingUpdate(false);
+                    if (result) setUpdateStatus(result);
+                    toast.success("Update check complete");
+                  }}
+                >
+                  Check for Updates
+                </Button>
+
+                {updateStatus?.stage === "available" && (
+                  <Button
+                    size="sm" variant="secondary"
+                    onClick={async () => {
+                      const ok = await window.electronAPI?.downloadUpdate().catch(() => false);
+                      if (!ok) toast.error("Download failed — see logs");
+                    }}
+                  >
+                    Download Update
+                  </Button>
+                )}
+
+                {updateStatus?.stage === "downloaded" && (
+                  <Button
+                    size="sm"
+                    onClick={() => window.electronAPI?.installUpdate()}
+                  >
+                    Restart to Update
+                  </Button>
+                )}
+              </div>
             </div>
           </Card>
         )}

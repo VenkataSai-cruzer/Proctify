@@ -1,11 +1,43 @@
 // ============================================================
-// SecureAssess Teacher Desktop — Auto-Updater
-// Uses electron-updater to check the lab server's /updates route
-// or a configured remote update feed.
+// Proctify Teacher Desktop — Auto-Updater
+//
+// Multi-app release safety: both desktop apps publish to the same GitHub
+// release, so each one uses its own electron-builder channel and therefore its
+// own manifest (`teacher.yml` / `teacher-linux.yml` vs `student*.yml`).
+// Without this, whichever app built last overwrote `latest.yml` and the other
+// app would download a foreign installer.
+//
+// Downloads are never started automatically (`autoDownload = false`); the
+// renderer drives check → download → restart through IPC and receives live
+// status events, which are all mirrored into main.log.
 // ============================================================
 
-import { app, BrowserWindow, ipcMain } from "electron";
+import { app, ipcMain } from "electron";
+import type { BrowserWindow } from "electron";
+import path from "path";
+import fs from "fs";
 import { logger } from "./logger";
+import { safeSend } from "./safeSend";
+
+/** Release channel — must match `publish.channel` in electron-builder.yml. */
+const UPDATE_CHANNEL = "teacher";
+
+export type UpdaterStage =
+  | "checking"
+  | "available"
+  | "not-available"
+  | "progress"
+  | "downloaded"
+  | "error"
+  | "disabled";
+
+export interface UpdaterStatus {
+  stage: UpdaterStage;
+  channel: string;
+  version?: string;
+  percent?: number;
+  message?: string;
+}
 
 // Lazy-load electron-updater so it doesn't crash in dev
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -23,65 +55,144 @@ function getUpdater() {
   return autoUpdater;
 }
 
-export function initAutoUpdater(mainWindow: BrowserWindow, serverUrl: string): void {
+export type WindowGetter = () => BrowserWindow | null;
+
+/** Returns a disposer that removes timers/listeners on shutdown. */
+export function initAutoUpdater(getWindow: WindowGetter, serverUrl: string): () => void {
   const updater = getUpdater();
-  if (!updater) return;
+  if (!updater) return () => undefined;
 
-  updater.logger = logger;
-  updater.autoDownload = false;
-  updater.autoInstallOnAppQuit = true;
+  const send = (status: UpdaterStatus): void => {
+    safeSend(getWindow(), "updater:status", status);
+  };
 
-  // If running on lab LAN, check the local server for updates
-  if (serverUrl && !serverUrl.includes("localhost") && !serverUrl.includes("127.0.0.1")) {
-    updater.setFeedURL({ url: `${serverUrl}/updates` });
+  // electron-builder writes app-update.yml into resources/ for installed
+  // builds only. Unpacked (--dir) and portable copies have no update config,
+  // and electron-updater logs a hard ENOENT error when asked to check anyway.
+  const hasRemoteFeed =
+    Boolean(serverUrl) && !serverUrl.includes("localhost") && !serverUrl.includes("127.0.0.1");
+  const hasUpdateConfig = fs.existsSync(path.join(process.resourcesPath, "app-update.yml"));
+  if (!hasRemoteFeed && !hasUpdateConfig) {
+    logger.info("Auto-updater disabled — this build has no app-update.yml", {
+      channel: UPDATE_CHANNEL,
+      resources: process.resourcesPath,
+      packaged: app.isPackaged,
+    });
+    const disabled: UpdaterStatus = {
+      stage: "disabled",
+      channel: UPDATE_CHANNEL,
+      message: "This build has no update configuration",
+    };
+    ipcMain.handle("updater:check", () => disabled);
+    ipcMain.handle("updater:download", () => null);
+    ipcMain.handle("updater:install", () => false);
+    return () => undefined;
   }
 
-  updater.on("checking-for-update", () => {
-    mainWindow.webContents.send("updater:status", { stage: "checking" });
+  updater.logger = logger;
+  updater.autoDownload = false;     // user-initiated only
+  updater.autoInstallOnAppQuit = true;
+  updater.channel = UPDATE_CHANNEL; // → teacher.yml / teacher-linux.yml
+
+  logger.info("Auto-updater configured", {
+    channel: UPDATE_CHANNEL,
+    currentVersion: app.getVersion(),
   });
 
-  updater.on("update-available", (info: { version: string }) => {
-    logger.info("Update available", { version: info.version });
-    mainWindow.webContents.send("updater:status", {
-      stage: "available", version: info.version,
+  // If running on lab LAN, check the local server for updates
+  if (hasRemoteFeed) {
+    updater.setFeedURL({ url: `${serverUrl}/updates/${UPDATE_CHANNEL}` });
+  }
+
+  const onChecking = () => {
+    logger.info("Updater: checking for update", { channel: UPDATE_CHANNEL });
+    send({ stage: "checking", channel: UPDATE_CHANNEL });
+  };
+  const onAvailable = (info: { version: string }) => {
+    logger.info("Updater: update available", { version: info.version, channel: UPDATE_CHANNEL });
+    send({ stage: "available", channel: UPDATE_CHANNEL, version: info.version });
+  };
+  const onNotAvailable = (info: { version?: string }) => {
+    logger.info("Updater: already up to date", {
+      current: app.getVersion(),
+      latest: info?.version,
+      channel: UPDATE_CHANNEL,
     });
-  });
-
-  updater.on("update-not-available", () => {
-    mainWindow.webContents.send("updater:status", { stage: "current" });
-  });
-
-  updater.on("download-progress", (progress: { percent: number }) => {
-    mainWindow.webContents.send("updater:status", {
-      stage: "downloading", percent: Math.round(progress.percent),
+    send({ stage: "not-available", channel: UPDATE_CHANNEL, version: app.getVersion() });
+  };
+  const onProgress = (progress: { percent: number }) =>
+    send({
+      stage: "progress",
+      channel: UPDATE_CHANNEL,
+      percent: Math.round(progress.percent),
     });
-  });
-
-  updater.on("update-downloaded", (info: { version: string }) => {
-    logger.info("Update downloaded", { version: info.version });
-    mainWindow.webContents.send("updater:status", {
-      stage: "ready", version: info.version,
+  const onDownloaded = (info: { version: string }) => {
+    logger.info("Updater: update downloaded", { version: info.version, channel: UPDATE_CHANNEL });
+    send({ stage: "downloaded", channel: UPDATE_CHANNEL, version: info.version });
+  };
+  const onError = (err: Error) => {
+    logger.warn("Updater: error (non-fatal)", {
+      channel: UPDATE_CHANNEL,
+      error: err.message,
     });
+    send({ stage: "error", channel: UPDATE_CHANNEL, message: err.message });
+  };
+
+  updater.on("checking-for-update", onChecking);
+  updater.on("update-available", onAvailable);
+  updater.on("update-not-available", onNotAvailable);
+  updater.on("download-progress", onProgress);
+  updater.on("update-downloaded", onDownloaded);
+  updater.on("error", onError);
+
+  ipcMain.handle("updater:check", async () => {
+    try {
+      const result = await updater.checkForUpdates();
+      return {
+        stage: result?.updateInfo ? "available" : "not-available",
+        channel: UPDATE_CHANNEL,
+        version: result?.updateInfo?.version,
+      } satisfies UpdaterStatus;
+    } catch (err) {
+      logger.warn("Updater: check failed", { error: (err as Error).message });
+      return { stage: "error", channel: UPDATE_CHANNEL, message: (err as Error).message } satisfies UpdaterStatus;
+    }
   });
 
-  updater.on("error", (err: Error) => {
-    logger.warn("Auto-updater error (non-fatal)", { error: err.message });
-    mainWindow.webContents.send("updater:status", { stage: "error", message: err.message });
-  });
-
-  // IPC handlers
-  ipcMain.handle("updater:checkNow", async () => {
-    try { return await updater.checkForUpdates(); } catch { return null; }
-  });
   ipcMain.handle("updater:download", async () => {
-    try { return await updater.downloadUpdate(); } catch { return null; }
+    try {
+      await updater.downloadUpdate();
+      return true;
+    } catch (err) {
+      logger.warn("Updater: download failed", { error: (err as Error).message });
+      send({ stage: "error", channel: UPDATE_CHANNEL, message: (err as Error).message });
+      return false;
+    }
   });
-  ipcMain.handle("updater:installNow", () => {
+
+  ipcMain.handle("updater:install", () => {
+    logger.info("Updater: restarting to install", { channel: UPDATE_CHANNEL });
     updater.quitAndInstall(false, true);
+    return true;
   });
 
   // Check on startup (5s delay to let UI load)
-  setTimeout(() => {
+  const startupTimer = setTimeout(() => {
     updater.checkForUpdates().catch(() => { /* network may be unavailable */ });
-  }, 5000);
+  }, 5_000);
+  startupTimer.unref?.();
+
+  return () => {
+    clearTimeout(startupTimer);
+    for (const [event, handler] of [
+      ["checking-for-update", onChecking],
+      ["update-available", onAvailable],
+      ["update-not-available", onNotAvailable],
+      ["download-progress", onProgress],
+      ["update-downloaded", onDownloaded],
+      ["error", onError],
+    ] as const) {
+      try { updater.removeListener(event, handler); } catch { /* ignore */ }
+    }
+  };
 }

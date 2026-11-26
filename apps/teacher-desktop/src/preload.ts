@@ -25,16 +25,25 @@ contextBridge.exposeInMainWorld("electronAPI", {
   // Projector
   openProjector: ()                             => ipcRenderer.invoke("projector:open"),
 
+  // Embedded API server (spawned by the main process in HOME / LAB_SERVER)
+  getServerInfo: ()                             => ipcRenderer.invoke("server:info"),
+  restartServer: ()                             => ipcRenderer.invoke("server:restart"),
+  getDatabaseUrl:()                             => ipcRenderer.invoke("app:getDatabaseUrl"),
+  onServerStatus: (cb: (data: unknown) => void) =>
+    ipcRenderer.on("server:status", (_event, data) => cb(data)),
+  onServerLog: (cb: (data: { level: string; line: string }) => void) =>
+    ipcRenderer.on("server:log", (_event, data) => cb(data)),
+
   // App info & data paths
   getVersion:     ()                            => ipcRenderer.invoke("app:getVersion"),
   getPlatform:    ()                            => ipcRenderer.invoke("app:getPlatform"),
   getUserDataPath:()                            => ipcRenderer.invoke("app:getUserDataPath"),
   getDbPath:      ()                            => ipcRenderer.invoke("app:getDbPath"),
 
-  // Auto-updater controls (renderer-initiated)
-  checkForUpdates:  ()                          => ipcRenderer.invoke("updater:checkNow"),
+  // Auto-updater controls (renderer-initiated). Teacher release channel.
+  checkForUpdates:  ()                          => ipcRenderer.invoke("updater:check"),
   downloadUpdate:   ()                          => ipcRenderer.invoke("updater:download"),
-  installUpdate:    ()                          => ipcRenderer.invoke("updater:installNow"),
+  installUpdate:    ()                          => ipcRenderer.invoke("updater:install"),
 
   // Event subscriptions from main → renderer
   onDiscoveryServerFound: (callback: (data: unknown) => void) =>

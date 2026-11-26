@@ -61,7 +61,7 @@ export function AppShell({ children, title, subtitle, actions }: Props) {
             </svg>
           </div>
           <div className="min-w-0">
-            <p className="text-sm font-bold text-white leading-tight">SecureAssess</p>
+            <p className="text-sm font-bold text-white leading-tight">Proctify</p>
             <ModeTag />
           </div>
         </div>

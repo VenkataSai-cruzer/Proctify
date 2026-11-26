@@ -1,7 +1,7 @@
 {
   "name": "@secureassess/teacher-desktop",
   "homepage": "https://github.com/VenkataSai-cruzer/Proctify",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "SecureAssess Teacher Desktop — Exam management and live proctoring console",
   "author": "SecureAssess <admin@secureassess.local>",
   "private": true,
@@ -12,10 +12,11 @@
     "dev:main": "node ../../scripts/build-electron.mjs .",
     "build:main": "node ../../scripts/build-electron.mjs .",
     "build": "node ../../scripts/build-electron.mjs . && vite build",
+    "bundle:server": "node ../server/scripts/build-bundle.mjs",
     "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.main.json",
-    "package:win": "electron-builder --config electron-builder.yml --win",
-    "package:linux": "electron-builder --config electron-builder.yml --linux",
-    "package:all": "electron-builder --config electron-builder.yml --win --linux"
+    "package:win": "yarn bundle:server && electron-builder --config electron-builder.yml --win",
+    "package:linux": "yarn bundle:server && electron-builder --config electron-builder.yml --linux",
+    "package:all": "yarn bundle:server && electron-builder --config electron-builder.yml --win --linux"
   },
   "dependencies": {
     "@electron/fuses": "^1.8.0",
@@ -78,9 +79,9 @@
     "zustand": "^4.5.4"
   },
   "build": {
-    "appId": "com.secureassess.teacher",
-    "productName": "SecureAssess Teacher",
-    "copyright": "Copyright © 2024 SecureAssess",
+    "appId": "com.proctify.teacher",
+    "productName": "Proctify Teacher",
+    "copyright": "Copyright © 2024 Proctify",
     "files": [
       "dist/**/*",
       "node_modules/**/*"
@@ -105,14 +106,14 @@
           ]
         }
       ],
-      "icon": "assets/icon.ico"
+      "icon": "build/icon.ico"
     },
     "linux": {
       "target": [
         "AppImage",
         "deb"
       ],
-      "icon": "assets/icon.png",
+      "icon": "build/icon.png",
       "category": "Education"
     },
     "nsis": {

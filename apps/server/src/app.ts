@@ -18,7 +18,10 @@ import { exportRouter } from "./routes/export";
 import { studentRouter } from "./routes/student";
 import { saexamRouter } from "./routes/saexam";
 import { updatesRouter } from "./routes/updates";
+import { checkDatabase } from "./db/bootstrap";
 import { logger } from "./utils/logger";
+
+const startedAt = Date.now();
 
 export const app = express();
 
@@ -56,12 +59,19 @@ app.use(rateLimit({
 }));
 
 // ── Health check (no auth required) ──────────────────────────
-app.get("/health", (_req, res) => {
-  res.json({
-    status: "ok",
+// Used by the Teacher desktop app to wait for the embedded server before it
+// shows the UI, and by the packaged smoke test. Returns 503 (never 200) when
+// the database is unusable, so a broken DB cannot look "healthy".
+app.get("/health", async (_req, res) => {
+  const db = await checkDatabase();
+  res.status(db.ok ? 200 : 503).json({
+    status: db.ok ? "ok" : "degraded",
     service: "secureassess-server",
     labName: process.env.LAB_NAME ?? "SecureAssess Lab",
-    version: "1.0.0",
+    version: process.env.APP_VERSION ?? "1.1.0",
+    embedded: process.env.EMBEDDED_SERVER === "1",
+    db: { ok: db.ok, tables: db.tables, error: db.error },
+    uptimeMs: Date.now() - startedAt,
     timestamp: new Date().toISOString(),
   });
 });
@@ -81,7 +91,7 @@ app.use("/api/saexam",  saexamRouter);
 app.use("/updates",    updatesRouter);
 
 // ── Serve static exports ──────────────────────────────────────
-app.use("/exports", express.static(path.join(process.cwd(), "exports")));
+app.use("/exports", express.static(process.env.EXPORTS_DIR ?? path.join(process.cwd(), "exports")));
 
 // ── 404 handler ───────────────────────────────────────────────
 app.use((_req, res) => {

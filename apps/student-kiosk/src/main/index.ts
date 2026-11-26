@@ -10,7 +10,7 @@
 
 import {
   app, BrowserWindow, globalShortcut, screen,
-  powerSaveBlocker, ipcMain, session, shell,
+  powerSaveBlocker, ipcMain, session, shell, Menu,
 } from "electron";
 import type { IpcMainInvokeEvent } from "electron";
 import path from "path";
@@ -21,6 +21,10 @@ import { initTelemetry } from "./telemetry";
 import { installGlobalErrorHandlers } from "./crashGuard";
 import { logger } from "./logger";
 import { runSmokeTest } from "./smokeTest";
+import { safeSend, isWindowUsable } from "./safeSend";
+import { installLifecycleCleanup, registerCleanup } from "./lifecycle";
+import { attachRendererDiagnostics } from "./rendererDiagnostics";
+import { initAutoUpdater } from "./autoUpdater";
 
 const isDev = process.env.NODE_ENV === "development";
 const isSmokeTest = process.argv.includes("--smoke-test");
@@ -49,9 +53,31 @@ if (!isDev && sandboxDisabledForCi) {
 }
 app.commandLine.appendSwitch("disable-dev-shm-usage");
 
+// No default File/Edit/View/Window/Help menu: it exposes DevTools/Reload and
+// looks wrong on a locked-down exam client. Chromium keeps the standard text
+// editing shortcuts (Ctrl+C/V/X/A) working inside inputs without it.
+Menu.setApplicationMenu(null);
+
 let kioskWindow: BrowserWindow | null = null;
 let powerBlockId: number | null = null;
 let currentLockdownMode: LockdownMode = "KIOSK";
+
+// ── Shutdown ordering ─────────────────────────────────────────
+// Release background resources BEFORE the window is destroyed. The window's
+// "close" handler blocks quitting in production, so cleanup destroys it
+// directly (destroy() bypasses close) and the re-entrant quit then succeeds.
+installLifecycleCleanup();
+registerCleanup("global-shortcuts", () => globalShortcut.unregisterAll());
+registerCleanup("power-save-blocker", () => {
+  if (powerBlockId !== null) {
+    powerSaveBlocker.stop(powerBlockId);
+    powerBlockId = null;
+  }
+});
+registerCleanup("kiosk-window", () => {
+  if (kioskWindow && !kioskWindow.isDestroyed()) kioskWindow.destroy();
+  kioskWindow = null;
+});
 
 // ── Allowed IPC frame origins ─────────────────────────────────
 // Only our own renderer pages may invoke IPC handlers.
@@ -149,7 +175,8 @@ async function createExamWindow(mode: LockdownMode): Promise<void> {
     minimizable: !isKiosk,
     maximizable: !isKiosk,
     titleBarStyle: isKiosk ? "hidden" : "default",
-    title: "SecureAssess — Exam",
+    title: "Proctify — Exam",
+    autoHideMenuBar: true,
     backgroundColor: "#F8FAFC",
     webPreferences: {
       preload: path.join(__dirname, "../preload/index.js"),
@@ -161,6 +188,15 @@ async function createExamWindow(mode: LockdownMode): Promise<void> {
     },
     skipTaskbar: isKiosk,
     icon: path.join(__dirname, "../../assets/icon.png"),
+  });
+
+  kioskWindow.setMenuBarVisibility(false);
+
+  // Renderer failures must reach main.log; a blank kiosk is otherwise opaque.
+  attachRendererDiagnostics(kioskWindow, "kiosk-main");
+
+  kioskWindow.on("closed", () => {
+    kioskWindow = null;
   });
 
   // ── Strict CSP via response headers ────────────────────────
@@ -188,16 +224,16 @@ async function createExamWindow(mode: LockdownMode): Promise<void> {
 
   // ── WINDOWED mode: blur violation emitters ────────────────
   if (!isKiosk) {
-    kioskWindow.on("blur", () => {
-      kioskWindow?.webContents.send("kiosk:windowBlur");
-    });
-    kioskWindow.on("focus", () => {
-      kioskWindow?.webContents.send("kiosk:windowFocus");
-    });
+    kioskWindow.on("blur", () => safeSend(kioskWindow, "kiosk:windowBlur"));
+    kioskWindow.on("focus", () => safeSend(kioskWindow, "kiosk:windowFocus"));
   }
 
-  screen.on("display-added", () => {
-    if (!isDev) kioskWindow?.focus();
+  const onDisplayAdded = (): void => {
+    if (!isDev && isWindowUsable(kioskWindow)) kioskWindow.focus();
+  };
+  screen.on("display-added", onDisplayAdded);
+  registerCleanup("display-listener", () => {
+    screen.removeListener("display-added", onDisplayAdded);
   });
 
   if (isDev) {
@@ -224,8 +260,11 @@ function applyShortcutBlock(mode: LockdownMode): void {
     "Ctrl+U", "Ctrl+P", "Ctrl+S", "Ctrl+C", "Ctrl+V",
   ];
   for (const sc of blocked) {
-    try { globalShortcut.register(sc, () => kioskWindow?.focus()); }
-    catch { /* ignore */ }
+    try {
+      globalShortcut.register(sc, () => {
+        if (isWindowUsable(kioskWindow)) kioskWindow.focus();
+      });
+    } catch { /* ignore */ }
   }
 }
 
@@ -277,8 +316,8 @@ function registerIpc(): void {
       kioskWindow.setAlwaysOnTop(false);
       kioskWindow.setSkipTaskbar(false);
       kioskWindow.setMinimizable(true);
-      kioskWindow.on("blur", () => kioskWindow?.webContents.send("kiosk:windowBlur"));
-      kioskWindow.on("focus", () => kioskWindow?.webContents.send("kiosk:windowFocus"));
+      kioskWindow.on("blur", () => safeSend(kioskWindow, "kiosk:windowBlur"));
+      kioskWindow.on("focus", () => safeSend(kioskWindow, "kiosk:windowFocus"));
     }
   });
 
@@ -339,15 +378,17 @@ app.whenReady().then(async () => {
   await createExamWindow(currentLockdownMode);
   applyShortcutBlock(currentLockdownMode);
   registerIpc();
+
+  // Student release channel — status goes to main.log and the renderer.
+  const disposeUpdater = initAutoUpdater(() => kioskWindow);
+  registerCleanup("auto-updater", disposeUpdater);
 });
 
 app.on("window-all-closed", () => {
-  if (!isDev) return;
-  if (powerBlockId !== null) powerSaveBlocker.stop(powerBlockId);
-  globalShortcut.unregisterAll();
+  // The smoke test destroys its hidden windows on purpose; quitting here would
+  // abort the test before it can report results.
+  if (isSmokeTest) return;
+  // In production the kiosk window should only disappear as part of a quit;
+  // exiting here avoids leaving a headless kiosk process behind.
   app.quit();
-});
-
-app.on("will-quit", () => {
-  globalShortcut.unregisterAll();
 });

@@ -18,5 +18,14 @@ contextBridge.exposeInMainWorld("kioskAPI", {
   // WINDOWED mode — main process emits these when window loses/gains focus
   onWindowBlur:  (cb: () => void) => ipcRenderer.on("kiosk:windowBlur",  () => cb()),
   onWindowFocus: (cb: () => void) => ipcRenderer.on("kiosk:windowFocus", () => cb()),
+
+  // Auto-updater (student release channel; never downloads automatically)
+  checkForUpdates: () => ipcRenderer.invoke("updater:check"),
+  downloadUpdate:  () => ipcRenderer.invoke("updater:download"),
+  installUpdate:   () => ipcRenderer.invoke("updater:install"),
+  onUpdaterStatus: (cb: (data: {
+    stage: string; channel: string; version?: string; percent?: number; message?: string;
+  }) => void) => ipcRenderer.on("updater:status", (_e, data) => cb(data)),
+
   removeAllListeners: (ch: string) => ipcRenderer.removeAllListeners(ch),
 });

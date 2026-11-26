@@ -1682,6 +1682,7 @@ __metadata:
     concurrently: "npm:^8.2.2"
     electron: "npm:31.7.7"
     electron-builder: "npm:^24.13.3"
+    electron-updater: "npm:^6.3.4"
     esbuild: "npm:^0.28.2"
     framer-motion: "npm:^11.2.13"
     lucide-react: "npm:^0.400.0"

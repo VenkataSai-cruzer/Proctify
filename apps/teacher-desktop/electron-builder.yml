@@ -2,9 +2,9 @@
 # SecureAssess Teacher Desktop — electron-builder config
 # ============================================================
 
-appId: com.secureassess.teacher
-productName: SecureAssess Teacher
-copyright: "Copyright © 2024 SecureAssess"
+appId: com.proctify.teacher
+productName: Proctify Teacher
+copyright: "Copyright © 2024 Proctify"
 
 # Security: apply @electron/fuses after packing
 afterPack: ./afterPack.js
@@ -18,6 +18,8 @@ directories:
 files:
   - dist/**/*
   - "!dist/renderer/**/*.map"
+  # App / window icon (BrowserWindow reads app.asar/assets/icon.png)
+  - assets/icon.png
 
 # Extra resources bundled at the root of the app
 extraResources:
@@ -26,6 +28,25 @@ extraResources:
     to: cctv-vision
     filter:
       - "**/*"
+
+  # ── Embedded API server (zero terminal required) ───────────
+  # dist/bundle.cjs is produced by apps/server/scripts/build-bundle.mjs.
+  # It runs with process.execPath + ELECTRON_RUN_AS_NODE=1, so it needs its
+  # external dependencies next to it in resources/server/node_modules.
+  - from: "../server/dist/bundle.cjs"
+    to: server/bundle.cjs
+  - from: "../server/dist/bundle.cjs.map"
+    to: server/bundle.cjs.map
+  - from: "../server/prisma/schema.prisma"
+    to: server/prisma/schema.prisma
+  - from: "../../node_modules/@prisma/client"
+    to: server/node_modules/@prisma/client
+  - from: "../../node_modules/.prisma/client"
+    to: server/node_modules/.prisma/client
+  - from: "../../node_modules/pdf-parse"
+    to: server/node_modules/pdf-parse
+  - from: "../../node_modules/node-ensure"
+    to: server/node_modules/node-ensure
   # Prisma engines for the target platform
   - from: "../../node_modules/@prisma/engines"
     to: prisma-engines
@@ -42,24 +63,25 @@ asarUnpack:
   - "**/node_modules/@prisma/**"
 
 # ── GitHub Releases (teacher desktop) ─────────────────────────
-# electron-updater fetches latest.yml from the GitHub release page.
-# The in-app auto-updater in src/main/autoUpdater.ts will fall back
-# to the LAN server (/updates) if the GitHub URL is overridden in settings.
+# Dedicated channel: this app reads teacher.yml / teacher-linux.yml, the kiosk
+# reads student.yml / student-linux.yml. Sharing `latest.yml` made the two apps
+# overwrite each other's update manifest on the same release.
 publish:
   - provider: github
     owner: VenkataSai-cruzer
     repo: Proctify
     releaseType: release
+    channel: teacher
 
 # Windows
 win:
   target:
     - target: nsis
       arch: [x64]
-  icon: assets/icon.png
+  icon: build/icon.ico
   # No spaces: GitHub sanitizes spaces in uploaded asset names, which left
-  # latest.yml pointing at a filename that did not exist on the release.
-  artifactName: "SecureAssess-Teacher-Setup-${version}.${ext}"
+  # teacher.yml pointing at a filename that did not exist on the release.
+  artifactName: "Proctify-Teacher-Setup-${version}.${ext}"
   verifyUpdateCodeSignature: false
   signAndEditExecutable: false
 
@@ -68,22 +90,22 @@ nsis:
   allowToChangeInstallationDirectory: true
   createDesktopShortcut: true
   createStartMenuShortcut: true
-  shortcutName: SecureAssess Teacher
+  shortcutName: Proctify Teacher
 
 # Linux
 linux:
-  executableName: secureassess-teacher
-  artifactName: "secureassess-teacher-${version}-${arch}.${ext}"
+  executableName: proctify-teacher
+  artifactName: "proctify-teacher-${version}-${arch}.${ext}"
   target:
     - AppImage
     - deb
-  icon: assets/icon.png
+  icon: build/icon.png
   category: Education
-  maintainer: "SecureAssess <admin@secureassess.local>"
+  maintainer: "Proctify <admin@secureassess.local>"
   synopsis: Secure Examination & Proctoring Platform — Teacher Console
 
 deb:
-  packageName: secureassess-teacher
+  packageName: proctify-teacher
   depends:
     - libgtk-3-0
     - libnotify4

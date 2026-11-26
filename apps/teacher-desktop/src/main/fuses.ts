@@ -5,7 +5,11 @@
 // to flip Electron fuses on the built binary.
 //
 // In production:
-//   • runAsNode: OFF   — prevents `ELECTRON_RUN_AS_NODE` env injection
+//   • runAsNode: ON    — REQUIRED: the embedded API server is spawned with
+//                        `process.execPath` + ELECTRON_RUN_AS_NODE=1 (no Node
+//                        runtime is installed on lab machines). Turning this
+//                        off launched a second full Electron app instead of
+//                        the server. See src/main/embeddedServer.ts.
 //   • nodeCliInspect: OFF  — blocks --inspect / --inspect-brk
 //   • onlyLoadAppFromAsar: ON  — prevents loading from loose dirs
 //   • loadBrowserProcessSpecificV8SnapshotFile: OFF
@@ -26,7 +30,7 @@ export async function applyFuses(buildPath: string): Promise<void> {
       version: FuseVersion.V1,
       resetAdditionalFuses: true,
       override: {
-        runAsNode: false,                         // ← disable
+        runAsNode: true,                          // ← required by embedded server
         nodeCliInspect: false,                   // ← disable --inspect
         enableEmbeddedAsarIntegrityValidation: true,
         onlyLoadAppFromAsar: true,                // ← enforce asar

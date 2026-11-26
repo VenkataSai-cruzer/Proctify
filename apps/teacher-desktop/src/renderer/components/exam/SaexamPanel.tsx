@@ -28,7 +28,7 @@ export function SaexamPanel({ examId }: Props) {
       if (window.electronAPI) {
         const savePath = await window.electronAPI.saveFileDialog({
           defaultPath: filename,
-          filters: [{ name: "SecureAssess Exam Bundle", extensions: ["saexam"] }],
+          filters: [{ name: "Proctify Exam Bundle", extensions: ["saexam"] }],
         });
         if (savePath) {
           const res = await fetch(`${serverUrl}${url}`);
@@ -54,7 +54,7 @@ export function SaexamPanel({ examId }: Props) {
 
       if (window.electronAPI) {
         const filePath = await window.electronAPI.openFileDialog([
-          { name: "SecureAssess Exam Bundle", extensions: ["saexam"] },
+          { name: "Proctify Exam Bundle", extensions: ["saexam"] },
         ]);
         if (!filePath) { setImporting(false); return; }
         const fileBuffer = await window.electronAPI.readFile(filePath);

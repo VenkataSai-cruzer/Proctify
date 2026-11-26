@@ -2,9 +2,9 @@
 # SecureAssess Student Kiosk — electron-builder config
 # ============================================================
 
-appId: com.secureassess.student
-productName: SecureAssess Student Kiosk
-copyright: "Copyright © 2024 SecureAssess"
+appId: com.proctify.student
+productName: Proctify Student Kiosk
+copyright: "Copyright © 2024 Proctify"
 
 # Security: apply @electron/fuses after packing
 afterPack: ./afterPack.js
@@ -16,6 +16,8 @@ directories:
 files:
   - dist/**/*
   - "!dist/renderer/**/*.map"
+  # App / window icon (BrowserWindow reads app.asar/assets/icon.png)
+  - assets/icon.png
 
 # Native addons and Prisma artefacts cannot be read from inside app.asar —
 # they are unpacked next to it and resolved through app.asar.unpacked.
@@ -24,22 +26,24 @@ asarUnpack:
   - "**/node_modules/.prisma/**"
   - "**/node_modules/@prisma/**"
 
-# ── LAN update server (student kiosk stays on local network) ──
-# The kiosk checks the lab server for updates, not GitHub,
-# because lab PCs may have no internet access during exams.
+# ── GitHub Releases (student kiosk) ───────────────────────────
+# Dedicated channel: this app reads student.yml / student-linux.yml while the
+# teacher console uses teacher*.yml, so neither overwrites the other's manifest.
 publish:
-  - provider: generic
-    url: http://secureassess-lab.local:3000/updates/student
-    useMultipleRangeRequest: false
+  - provider: github
+    owner: VenkataSai-cruzer
+    repo: Proctify
+    releaseType: release
+    channel: student
 
 win:
   target:
     - target: nsis
       arch: [x64]
-  icon: assets/icon.png
+  icon: build/icon.ico
   # No spaces: GitHub sanitizes spaces in uploaded asset names, so the
   # default "<productName> Setup <version>.exe" became a dotted filename.
-  artifactName: "SecureAssess-Student-Kiosk-Setup-${version}.${ext}"
+  artifactName: "Proctify-Student-Kiosk-Setup-${version}.${ext}"
   verifyUpdateCodeSignature: false
   signAndEditExecutable: false
 
@@ -47,19 +51,19 @@ nsis:
   oneClick: true
   createDesktopShortcut: false
   createStartMenuShortcut: true
-  shortcutName: SecureAssess Kiosk
+  shortcutName: Proctify Student Kiosk
 
 linux:
-  executableName: secureassess-student-kiosk
-  artifactName: "secureassess-student-kiosk-${version}-${arch}.${ext}"
+  executableName: proctify-student-kiosk
+  artifactName: "proctify-student-kiosk-${version}-${arch}.${ext}"
   target:
     - AppImage
     - deb
-  icon: assets/icon.png
+  icon: build/icon.png
   category: Education
 
 deb:
-  packageName: secureassess-student-kiosk
+  packageName: proctify-student-kiosk
   depends:
     - libgtk-3-0
     - libnss3

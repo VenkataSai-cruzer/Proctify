@@ -1,5 +1,5 @@
 # ============================================================
-# SecureAssess — Automated Cross-Platform Release Pipeline
+# Proctify — Automated Cross-Platform Release Pipeline
 # ============================================================
 #
 # Build-then-publish model:
@@ -126,8 +126,8 @@ jobs:
         shell: pwsh
         run: |
           $targets = @(
-            "apps\teacher-desktop\release\win-unpacked\SecureAssess Teacher.exe",
-            "apps\student-kiosk\release\win-unpacked\SecureAssess Student Kiosk.exe"
+            "apps\teacher-desktop\release\win-unpacked\Proctify Teacher.exe",
+            "apps\student-kiosk\release\win-unpacked\Proctify Student Kiosk.exe"
           )
           foreach ($exe in $targets) {
             if (-not (Test-Path $exe)) { throw "Missing unpacked binary: $exe" }
@@ -141,12 +141,15 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: windows-installers
+          # Each app publishes its own channel manifest (teacher.yml /
+          # student.yml), so both must be uploaded.
           path: |
             apps/teacher-desktop/release/*.exe
             apps/teacher-desktop/release/*.exe.blockmap
-            apps/teacher-desktop/release/latest.yml
+            apps/teacher-desktop/release/*.yml
             apps/student-kiosk/release/*.exe
             apps/student-kiosk/release/*.exe.blockmap
+            apps/student-kiosk/release/*.yml
           if-no-files-found: error
           retention-days: 1
 
@@ -220,8 +223,8 @@ jobs:
           ELECTRON_DISABLE_SANDBOX: "1"
         run: |
           for bin in \
-            apps/teacher-desktop/release/linux-unpacked/secureassess-teacher \
-            apps/student-kiosk/release/linux-unpacked/secureassess-student-kiosk; do
+            apps/teacher-desktop/release/linux-unpacked/proctify-teacher \
+            apps/student-kiosk/release/linux-unpacked/proctify-student-kiosk; do
             if [ ! -x "$bin" ]; then
               echo "::error::missing unpacked binary $bin"
               ls -la "$(dirname "$bin")" || true
@@ -236,12 +239,14 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: linux-installers
+          # Channel manifests: teacher-linux.yml / student-linux.yml
           path: |
             apps/teacher-desktop/release/*.AppImage
             apps/teacher-desktop/release/*.deb
-            apps/teacher-desktop/release/latest-linux.yml
+            apps/teacher-desktop/release/*.yml
             apps/student-kiosk/release/*.AppImage
             apps/student-kiosk/release/*.deb
+            apps/student-kiosk/release/*.yml
           if-no-files-found: error
           retention-days: 1
 
@@ -260,7 +265,7 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ github.ref_name }}
-          name: "SecureAssess ${{ github.ref_name }}"
+          name: "Proctify ${{ github.ref_name }}"
           generate_release_notes: true
           overwrite_files: true
           # upload-artifact roots artifacts at the least common ancestor of the
@@ -271,7 +276,7 @@ jobs:
           files: |
             release-assets/windows-installers/**/*.exe
             release-assets/windows-installers/**/*.exe.blockmap
-            release-assets/windows-installers/**/latest.yml
+            release-assets/windows-installers/**/*.yml
             release-assets/linux-installers/**/*.AppImage
             release-assets/linux-installers/**/*.deb
-            release-assets/linux-installers/**/latest-linux.yml
+            release-assets/linux-installers/**/*.yml

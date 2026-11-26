@@ -200,8 +200,11 @@ export default function LoginPage() {
   const isFirst     = setupStatus?.firstRun ?? false;
 
   return (
-    <div className="min-h-screen bg-[#0B1120] flex items-center justify-center px-4 py-8">
-      <div className="w-full max-w-sm">
+    /* flex-col + m-auto: centred when it fits, scrolls from the top when the
+       window is shorter than the form (e.g. 1366x768 laptops) instead of
+       clipping the logo/banner. */
+    <div className="min-h-screen bg-[#0B1120] flex flex-col items-center overflow-y-auto px-4 py-8">
+      <div className="w-full max-w-sm m-auto">
 
         {/* Logo */}
         <motion.div initial={{ opacity: 0, y: -20 }} animate={{ opacity: 1, y: 0 }} className="text-center mb-6">
@@ -211,7 +214,7 @@ export default function LoginPage() {
                 d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
             </svg>
           </div>
-          <h1 className="text-xl font-bold text-white">SecureAssess</h1>
+          <h1 className="text-xl font-bold text-white">Proctify</h1>
           <p className="text-slate-500 text-sm mt-0.5">
             {setupStatus?.labName ?? "Teacher Console"}
           </p>
@@ -375,7 +378,7 @@ export default function LoginPage() {
 
         {/* Footer */}
         <p className="text-center text-xs text-slate-600 mt-4">
-          SecureAssess v1.0 · Teacher Console
+          Proctify v1.2 · Teacher Console
           {setupStatus && (
             <span className="ml-1 text-slate-700">
               · {setupStatus.teacherCount} teacher{setupStatus.teacherCount !== 1 ? "s" : ""} registered

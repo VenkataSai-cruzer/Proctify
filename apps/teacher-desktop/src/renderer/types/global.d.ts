@@ -17,13 +17,35 @@ declare global {
       getPlatform:         () => Promise<string>;
       getUserDataPath:     () => Promise<string>;
       getDbPath:           () => Promise<string>;
-      checkForUpdates:     () => Promise<unknown>;
-      downloadUpdate:      () => Promise<unknown>;
+      getDatabaseUrl:      () => Promise<string>;
+      getServerInfo:       () => Promise<{
+        ok: boolean;
+        labMode: "HOME" | "LAB_SERVER" | "LAB_CLIENT" | null;
+        running: boolean;
+        embedded: boolean;
+        healthy: boolean;
+        port: number;
+        url: string;
+        pid: number | null;
+        restarts: number;
+        lastError: string | null;
+        bundlePath: string;
+        dbPath: string;
+      }>;
+      restartServer:       () => Promise<unknown>;
+      onServerStatus:      (callback: (data: unknown) => void) => void;
+      onServerLog:         (callback: (data: { level: string; line: string }) => void) => void;
+      checkForUpdates:     () => Promise<{
+        stage: string; channel?: string; version?: string; message?: string;
+      } | null>;
+      downloadUpdate:      () => Promise<boolean | null>;
       installUpdate:       () => void;
       exportDiagnostics:   () => Promise<{ saved: boolean; path?: string; error?: string }>;
       onDiscoveryServerFound: (callback: (data: { host: string; port: number; labName: string; serverVersion: string }) => void) => void;
       onCctvCalibrationRequest: (callback: (data: unknown) => void) => void;
-      onUpdaterStatus:     (callback: (data: { stage: string; version?: string; percent?: number; message?: string }) => void) => void;
+      onUpdaterStatus:     (callback: (data: {
+        stage: string; channel?: string; version?: string; percent?: number; message?: string;
+      }) => void) => void;
       removeAllListeners:  (channel: string) => void;
     };
   }

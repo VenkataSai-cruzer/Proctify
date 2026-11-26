@@ -25,7 +25,7 @@ function reportFatal(kind: string, reason: unknown): void {
   try {
     if (app.isReady()) {
       dialog.showErrorBox(
-        "SecureAssess Teacher encountered an error",
+        "Proctify Teacher encountered an error",
         `${summary}\n\nDetails were written to:\n${getLogFilePath()}`
       );
     }

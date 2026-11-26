@@ -1,7 +1,7 @@
 {
   "name": "@secureassess/student-kiosk",
   "homepage": "https://github.com/VenkataSai-cruzer/Proctify",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "SecureAssess Student Kiosk — Secure exam client with OS-level lockdown",
   "author": "SecureAssess <admin@secureassess.local>",
   "private": true,
@@ -20,6 +20,7 @@
     "@secureassess/shared": "workspace:*",
     "@sentry/electron": "^5.4.0",
     "clsx": "^2.1.1",
+    "electron-updater": "^6.3.4",
     "framer-motion": "^11.2.13",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
@@ -55,9 +56,9 @@
     "zustand": "^4.5.4"
   },
   "build": {
-    "appId": "com.secureassess.student",
-    "productName": "SecureAssess Student Kiosk",
-    "copyright": "Copyright © 2024 SecureAssess",
+    "appId": "com.proctify.student",
+    "productName": "Proctify Student Kiosk",
+    "copyright": "Copyright © 2024 Proctify",
     "files": [
       "dist/**/*",
       "node_modules/**/*"
@@ -71,14 +72,14 @@
           ]
         }
       ],
-      "icon": "assets/icon.ico"
+      "icon": "build/icon.ico"
     },
     "linux": {
       "target": [
         "AppImage",
         "deb"
       ],
-      "icon": "assets/icon.png",
+      "icon": "build/icon.png",
       "category": "Education"
     },
     "nsis": {

@@ -11,6 +11,7 @@ import { spawn, type ChildProcess } from "child_process";
 import path from "path";
 import fs from "fs";
 import { logger } from "./logger";
+import { safeSend } from "./safeSend";
 
 const MAX_RESTARTS = 3;
 const RESTART_BASE_DELAY_MS = 2_000;
@@ -54,9 +55,8 @@ function getCctvCommand(): string {
 }
 
 function send(getWindow: WindowGetter, channel: string, payload: unknown): void {
-  const win = getWindow();
-  if (!win || win.isDestroyed() || win.webContents.isDestroyed()) return;
-  win.webContents.send(channel, payload);
+  // Every child-process callback lands here, often after the window closed.
+  safeSend(getWindow(), channel, payload);
 }
 
 function pidAlive(pid: number): boolean {

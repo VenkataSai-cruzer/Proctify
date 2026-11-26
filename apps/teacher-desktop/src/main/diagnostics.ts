@@ -38,7 +38,7 @@ export function registerDiagnosticsIpc(): void {
         const summary = {
           generatedAt: new Date().toISOString(),
           app: {
-            name: "SecureAssess Teacher",
+            name: "Proctify Teacher",
             version: app.getVersion(),
             electronVersion: process.versions.electron,
             nodeVersion: process.versions.node,

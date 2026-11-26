@@ -12,7 +12,8 @@ import fs from "fs";
 import crypto from "crypto";
 
 const BACKUPS_DIR_NAME = "backups";
-const DB_FILE_NAME     = "secureassess.db";
+const DB_FILE_NAME     = "proctify.db";
+const LEGACY_DB_FILE_NAME = "secureassess.db";
 const MAX_BACKUPS      = 10; // keep last 10 daily snapshots
 
 export function getUserDataDir(): string {
@@ -27,8 +28,27 @@ export function getDatabaseUrl(): string {
   return `file:${getDbPath()}`;
 }
 
+/**
+ * Earlier builds used secureassess.db. Carry that data forward once so an
+ * upgrade does not silently start with an empty database.
+ */
+function migrateLegacyDatabase(): void {
+  const target = getDbPath();
+  const legacy = path.join(getUserDataDir(), LEGACY_DB_FILE_NAME);
+  try {
+    if (fs.existsSync(target) || !fs.existsSync(legacy)) return;
+    fs.copyFileSync(legacy, target);
+    // eslint-disable-next-line no-console
+    console.log(`[dataGuard] migrated ${legacy} -> ${target}`);
+  } catch {
+    /* first run or locked file — the server will create a fresh DB */
+  }
+}
+
 /** Creates a timestamped copy of the SQLite DB file at startup. */
 export function createStartupBackup(): void {
+  migrateLegacyDatabase();
+
   const dbPath = getDbPath();
   if (!fs.existsSync(dbPath)) return; // first run, nothing to back up
 

@@ -25,7 +25,7 @@ function reportFatal(kind: string, reason: unknown): void {
   try {
     if (app.isReady()) {
       dialog.showErrorBox(
-        "SecureAssess Student Kiosk encountered an error",
+        "Proctify Student Kiosk encountered an error",
         `${summary}\n\nDetails were written to:\n${getLogFilePath()}`
       );
     }

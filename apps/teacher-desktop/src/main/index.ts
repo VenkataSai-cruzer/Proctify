@@ -1,8 +1,15 @@
 // ============================================================
 // SecureAssess Teacher Desktop — Electron Main Process
+//
+// Startup contract (packaged, zero terminal required):
+//   1. data guards (writable userData, DB backup, DATABASE_URL)
+//   2. embedded API server on 127.0.0.1:<port> and /health 200
+//   3. window loads the bundled renderer (HashRouter, relative asset base)
+//   4. every main → renderer message goes through safeSend
+//   5. every background resource is released before the windows are gone
 // ============================================================
 
-import { app, BrowserWindow, ipcMain, shell, screen, session } from "electron";
+import { app, BrowserWindow, ipcMain, shell, screen, Menu } from "electron";
 import type { IpcMainInvokeEvent } from "electron";
 import path from "path";
 import {
@@ -26,6 +33,18 @@ import { initTelemetry } from "./telemetry";
 import { registerDiagnosticsIpc } from "./diagnostics";
 import { installGlobalErrorHandlers } from "./crashGuard";
 import { runSmokeTest } from "./smokeTest";
+import { safeSend, safeGetSize } from "./safeSend";
+import { installLifecycleCleanup, registerCleanup } from "./lifecycle";
+import { attachRendererDiagnostics } from "./rendererDiagnostics";
+import {
+  getServerBundlePath,
+  getServerStatus,
+  registerServerIpc,
+  setServerWindowGetter,
+  startEmbeddedServer,
+  stopEmbeddedServer,
+  type LabMode,
+} from "./embeddedServer";
 
 // electron-store is bundled into this file by scripts/build-electron.mjs
 // eslint-disable-next-line @typescript-eslint/no-require-imports
@@ -36,6 +55,11 @@ const isSmokeTest = process.argv.includes("--smoke-test");
 
 // Install before anything else can throw so early failures still hit main.log
 installGlobalErrorHandlers();
+
+// No default File/Edit/View/Window/Help menu: it exposes DevTools/Reload and
+// looks wrong in a packaged product. Chromium keeps the standard text editing
+// shortcuts (Ctrl+C/V/X/A) working inside inputs without it.
+Menu.setApplicationMenu(null);
 
 // Channels the smoke test expects to exist after IPC registration
 const SMOKE_TEST_CHANNELS = [
@@ -59,6 +83,8 @@ const SMOKE_TEST_CHANNELS = [
   "cctv:status",
   "cctv:health",
   "diagnostics:export",
+  "server:info",
+  "server:restart",
 ];
 
 // ── Allowed IPC frame origins ─────────────────────────────────
@@ -85,7 +111,8 @@ export const store: any = new Store({
   name: "secureassess-teacher",
   defaults: {
     labMode: "HOME",
-    serverUrl: "http://localhost:3000",
+    serverUrl: "http://127.0.0.1:3000",
+    serverPort: 3000,
     lastEmail: "",
     windowBounds: { width: 1440, height: 900 },
   },
@@ -93,6 +120,13 @@ export const store: any = new Store({
 
 let mainWindow: BrowserWindow | null = null;
 let projectorWindow: BrowserWindow | null = null;
+
+// Window bounds are persisted on quit and on resize — both must tolerate an
+// already-destroyed window (this was the `Object has been destroyed` crash).
+installLifecycleCleanup(() => {
+  const size = safeGetSize(mainWindow);
+  if (size) store.set("windowBounds", { width: size[0], height: size[1] });
+});
 
 // ── Pre-launch data safety checks ─────────────────────────────
 function runPreLaunchChecks(): boolean {
@@ -127,6 +161,31 @@ function registerAppInfoIpc(): void {
 }
 
 // ── Window creation ───────────────────────────────────────────
+function applySecurityHandlers(win: BrowserWindow): void {
+  // ── Strict CSP via session headers (http/dev loads) ────────
+  win.webContents.session.webRequest.onHeadersReceived((details, cb) => {
+    cb({
+      responseHeaders: {
+        ...details.responseHeaders,
+        "Content-Security-Policy": [
+          // connect-src must cover the embedded server (127.0.0.1) plus any
+          // configured LAN lab server. script-src stays locked to 'self'.
+          isDev
+            ? "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self' http: https: ws: wss:;"
+            : "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self' http: https: ws: wss:;",
+        ],
+      },
+    });
+  });
+
+  // ── Block external navigation ──────────────────────────
+  win.webContents.on("will-navigate", (event, url) => {
+    if (!url.startsWith("http://localhost") && !url.startsWith("file://")) {
+      event.preventDefault();
+    }
+  });
+}
+
 async function createMainWindow(): Promise<void> {
   const bounds = store.get("windowBounds") as { width: number; height: number } | undefined;
   const { width, height } = bounds ?? { width: 1440, height: 900 };
@@ -137,6 +196,8 @@ async function createMainWindow(): Promise<void> {
     minWidth: 1280,
     minHeight: 800,
     titleBarStyle: process.platform === "darwin" ? "hiddenInset" : "default",
+    title: "Proctify — Teacher Console",
+    autoHideMenuBar: true,
     backgroundColor: "#0B1120",
     webPreferences: {
       preload: path.join(__dirname, "../preload/index.js"),
@@ -147,35 +208,21 @@ async function createMainWindow(): Promise<void> {
     icon: path.join(__dirname, "../../assets/icon.png"),
   });
 
+  mainWindow.setMenuBarVisibility(false);
+
+  // Surface every renderer failure in main.log instead of a blank window.
+  attachRendererDiagnostics(mainWindow, "teacher-main");
+
   mainWindow.once("ready-to-show", () => mainWindow?.show());
   mainWindow.on("resize", () => {
-    const [w, h] = mainWindow!.getSize();
-    store.set("windowBounds", { width: w, height: h });
+    const size = safeGetSize(mainWindow);
+    if (size) store.set("windowBounds", { width: size[0], height: size[1] });
+  });
+  mainWindow.on("closed", () => {
+    mainWindow = null;
   });
 
-  // ── Strict CSP via session headers ──────────────────────
-  mainWindow.webContents.session.webRequest.onHeadersReceived((details, cb) => {
-    cb({
-      responseHeaders: {
-        ...details.responseHeaders,
-        "Content-Security-Policy": [
-          // connect-src must cover the configured lab server (any LAN host,
-          // or localhost when this machine runs the server). script-src stays
-          // locked to 'self'.
-          isDev
-            ? "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self' http: https: ws: wss:;"
-            : "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self' http: https: ws: wss:;",
-        ],
-      },
-    });
-  });
-
-  // ── Block external navigation ──────────────────────────
-  mainWindow.webContents.on("will-navigate", (event, url) => {
-    if (!url.startsWith("http://localhost") && !url.startsWith("file://")) {
-      event.preventDefault();
-    }
-  });
+  applySecurityHandlers(mainWindow);
 
   if (isDev) {
     await mainWindow.loadURL("http://localhost:5173");
@@ -186,9 +233,14 @@ async function createMainWindow(): Promise<void> {
 }
 
 async function createProjectorWindow(): Promise<void> {
-  const displays      = screen.getAllDisplays();
-  const externalDisplay = displays.find((d) => d.id !== screen.getPrimaryDisplay().id);
-  const target        = externalDisplay ?? screen.getPrimaryDisplay();
+  const displays         = screen.getAllDisplays();
+  const externalDisplay  = displays.find((d) => d.id !== screen.getPrimaryDisplay().id);
+  const target           = externalDisplay ?? screen.getPrimaryDisplay();
+
+  if (projectorWindow && !projectorWindow.isDestroyed()) {
+    projectorWindow.focus();
+    return;
+  }
 
   projectorWindow = new BrowserWindow({
     x: target.bounds.x,
@@ -196,6 +248,7 @@ async function createProjectorWindow(): Promise<void> {
     width: target.bounds.width,
     height: target.bounds.height,
     fullscreen: true,
+    autoHideMenuBar: true,
     backgroundColor: "#0B1120",
     webPreferences: {
       preload: path.join(__dirname, "../preload/index.js"),
@@ -205,6 +258,12 @@ async function createProjectorWindow(): Promise<void> {
     },
     titleBarStyle: "hidden",
   });
+
+  attachRendererDiagnostics(projectorWindow, "teacher-projector");
+  projectorWindow.on("closed", () => {
+    projectorWindow = null;
+  });
+  applySecurityHandlers(projectorWindow);
 
   if (isDev) {
     await projectorWindow.loadURL("http://localhost:5173#/projector");
@@ -222,12 +281,15 @@ app.whenReady().then(async () => {
 
   initTelemetry();
 
+  setServerWindowGetter(() => mainWindow);
+
   // ── Packaged smoke test: boot services, verify layout, exit ──
   if (isSmokeTest) {
     registerIpcHandlers(ipcMain, store, createProjectorWindow);
-    registerCctvLauncherIpc(() => mainWindow);
+    registerCctvLauncherIpc(() => null);
     registerDiagnosticsIpc();
     registerAppInfoIpc();
+    registerServerIpc();
 
     await runSmokeTest({
       store,
@@ -237,6 +299,12 @@ app.whenReady().then(async () => {
         binaryPath: getCctvBinaryPath(),
         present: isCctvBinaryPresent(),
       },
+      server: {
+        bundlePath: getServerBundlePath(),
+        start: startEmbeddedServer,
+        stop: stopEmbeddedServer,
+        status: getServerStatus,
+      },
     });
     return;
   }
@@ -244,34 +312,51 @@ app.whenReady().then(async () => {
   logger.info("main process ready", {
     version: app.getVersion(),
     packaged: app.isPackaged,
+    labMode: store.get("labMode"),
     serverUrl: store.get("serverUrl"),
   });
+
+  registerIpcHandlers(ipcMain, store, createProjectorWindow);
+  registerCctvLauncherIpc(() => mainWindow);
+  registerDiagnosticsIpc();
+  registerAppInfoIpc();
+  registerServerIpc();
+
+  registerCleanup("cctv-supervisor", () => disposeCctvProcess());
+
+  // ── Embedded API server (HOME / LAB_SERVER) ───────────────
+  const labMode = (store.get("labMode") as LabMode | undefined) ?? "HOME";
+  if (labMode !== "LAB_CLIENT") {
+    const preferredPort = Number(store.get("serverPort")) || 3000;
+    const status = await startEmbeddedServer({ labMode, preferredPort });
+    if (status.ok) {
+      store.set("serverUrl", status.url);
+      store.set("serverPort", status.port);
+      logger.info("UI will use embedded server", { url: status.url });
+    } else {
+      logger.error("Embedded server unavailable — UI may show a connection error", {
+        error: status.lastError,
+        bundlePath: status.bundlePath,
+      });
+    }
+  }
 
   await createMainWindow();
   logger.info("main window created");
 
-  registerIpcHandlers(ipcMain, store, createProjectorWindow);
-
-  // CCTV service supervisor (spawn bundled PyInstaller binary)
-  registerCctvLauncherIpc(() => mainWindow);
-
-  // 1-Click Diagnostics ZIP exporter
-  registerDiagnosticsIpc();
-
-  // mDNS discovery — notify renderer when lab server found
-  initMDNSDiscovery((server) => {
-    mainWindow?.webContents.send("discovery:serverFound", server);
+  // mDNS discovery — notify renderer when a lab server is found
+  const stopDiscovery = initMDNSDiscovery((server) => {
+    safeSend(mainWindow, "discovery:serverFound", server);
     store.set("serverUrl", `http://${server.host}:${server.port}`);
   });
+  if (stopDiscovery) registerCleanup("mdns-discovery", stopDiscovery);
 
   // Auto-updater (non-dev only)
-  if (!isDev && mainWindow) {
-    const serverUrl = store.get("serverUrl") as string ?? "http://localhost:3000";
-    initAutoUpdater(mainWindow, serverUrl);
+  if (!isDev) {
+    const serverUrl = (store.get("serverUrl") as string | undefined) ?? "http://127.0.0.1:3000";
+    const disposeUpdater = initAutoUpdater(() => mainWindow, serverUrl);
+    if (disposeUpdater) registerCleanup("auto-updater", disposeUpdater);
   }
-
-  // Expose userData path to renderer for display in Settings
-  registerAppInfoIpc();
 
   app.on("activate", async () => {
     if (BrowserWindow.getAllWindows().length === 0) await createMainWindow();
@@ -279,18 +364,21 @@ app.whenReady().then(async () => {
 });
 
 app.on("window-all-closed", () => {
+  // The smoke test destroys its hidden windows on purpose; quitting here would
+  // abort the test before it can report results.
+  if (isSmokeTest) return;
   if (process.platform !== "darwin") app.quit();
 });
 
-app.on("before-quit", () => {
-  const size = mainWindow?.getSize();
-  if (size) store.set("windowBounds", { width: size[0], height: size[1] });
-  disposeCctvProcess();
-});
-
+// Remaining shutdown work is handled by the lifecycle registry (installed
+// above): window bounds, embedded server, CCTV child, mDNS, updater timers.
 app.on("web-contents-created", (_event, contents) => {
   contents.setWindowOpenHandler(({ url }) => {
-    shell.openExternal(url);
+    try {
+      void shell.openExternal(url);
+    } catch (err) {
+      logger.warn("openExternal failed", { error: (err as Error).message });
+    }
     return { action: "deny" };
   });
 });

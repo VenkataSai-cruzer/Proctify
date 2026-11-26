@@ -1,5 +1,8 @@
 // ============================================================
 // SecureAssess Teacher Desktop — mDNS LAN Server Discovery
+//
+// Returns a disposer: the browser socket keeps the event loop alive and
+// firing into a closed window was one source of post-shutdown callbacks.
 // ============================================================
 
 // eslint-disable-next-line @typescript-eslint/no-require-imports
@@ -16,7 +19,7 @@ export interface DiscoveredServer {
 
 export function initMDNSDiscovery(
   onFound: (server: DiscoveredServer) => void
-): void {
+): (() => void) | null {
   try {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const bonjour = new (Bonjour.default ?? Bonjour)();
@@ -31,7 +34,17 @@ export function initMDNSDiscovery(
         serverVersion: service.txt?.version ?? "unknown",
       });
     });
+
+    return () => {
+      try {
+        browser.stop();
+        bonjour.destroy();
+      } catch {
+        /* already torn down */
+      }
+    };
   } catch {
     // mDNS unavailable on some networks — non-fatal
+    return null;
   }
 }
