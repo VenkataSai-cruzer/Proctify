@@ -223,10 +223,15 @@ jobs:
           name: "SecureAssess ${{ github.ref_name }}"
           generate_release_notes: true
           overwrite_files: true
+          # upload-artifact roots artifacts at the least common ancestor of the
+          # uploaded paths (apps/), so files land one level deeper than the
+          # artifact name. Match recursively, and fail loudly if a glob misses
+          # instead of silently publishing an asset-less release.
+          fail_on_unmatched_files: true
           files: |
-            release-assets/windows-installers/*.exe
-            release-assets/windows-installers/*.exe.blockmap
-            release-assets/windows-installers/latest.yml
-            release-assets/linux-installers/*.AppImage
-            release-assets/linux-installers/*.deb
-            release-assets/linux-installers/latest-linux.yml
+            release-assets/windows-installers/**/*.exe
+            release-assets/windows-installers/**/*.exe.blockmap
+            release-assets/windows-installers/**/latest.yml
+            release-assets/linux-installers/**/*.AppImage
+            release-assets/linux-installers/**/*.deb
+            release-assets/linux-installers/**/latest-linux.yml
