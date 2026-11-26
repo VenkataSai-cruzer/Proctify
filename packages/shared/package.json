@@ -1,6 +1,6 @@
 {
   "name": "@secureassess/shared",
-  "version": "1.0.1",
+  "version": "1.1.0",
   "private": true,
   "main": "dist/index.js",
   "module": "dist/esm/index.js",
@@ -14,7 +14,8 @@
   },
   "scripts": {
     "build": "tsc --project tsconfig.json && tsc --project tsconfig.esm.json",
-    "dev": "tsc --project tsconfig.json --watch"
+    "dev": "tsc --project tsconfig.json --watch",
+    "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.esm.json"
   },
   "dependencies": {
     "zod": "^3.23.8"

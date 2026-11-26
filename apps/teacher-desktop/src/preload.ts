@@ -50,6 +50,9 @@ contextBridge.exposeInMainWorld("electronAPI", {
   cctvStart:  (env: Record<string, string>) => ipcRenderer.invoke("cctv:start", env),
   cctvStop:   ()                             => ipcRenderer.invoke("cctv:stop"),
   cctvStatus: ()                             => ipcRenderer.invoke("cctv:status"),
+  cctvHealth: ()                             => ipcRenderer.invoke("cctv:health"),
+  onCctvHealth: (cb: (data: { healthy: boolean; pid?: number; restarts?: number; reason?: string; restartInMs?: number }) => void) =>
+    ipcRenderer.on("cctv:health", (_e, d) => cb(d)),
   onCctvLog:  (cb: (data: { level: string; line: string }) => void) =>
     ipcRenderer.on("cctv:log",     (_e, d) => cb(d)),
   onCctvStopped: (cb: (data: { code: number | null }) => void) =>

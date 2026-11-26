@@ -1,33 +1,75 @@
 // ============================================================
 // SecureAssess Student Kiosk — Main-process logger
-// Writes to userData/logs/ so logs survive app updates
+// Structured JSON lines in userData/logs/main.log so logs survive
+// app updates and can be attached to diagnostics.
 // ============================================================
 
 import { app } from "electron";
 import path from "path";
 import fs from "fs";
 
-type Level = "debug" | "info" | "warn" | "error";
+export type LogLevel = "debug" | "info" | "warn" | "error";
 
-function getLogsDir(): string {
+const LOG_FILE_NAME = "main.log";
+let cachedLogsDir: string | null = null;
+
+export function getLogsDir(): string {
+  if (cachedLogsDir) return cachedLogsDir;
   const dir = path.join(app.getPath("userData"), "logs");
-  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+  fs.mkdirSync(dir, { recursive: true });
+  cachedLogsDir = dir;
   return dir;
 }
 
-function write(level: Level, message: string, meta?: unknown): void {
-  const ts   = new Date().toISOString();
-  const line = `${ts} [${level.toUpperCase()}] ${message}${meta ? " " + JSON.stringify(meta) : ""}`;
-  if (level === "debug" && process.env.NODE_ENV !== "development") return;
-  console.log(line);
+export function getLogFilePath(): string {
+  return path.join(getLogsDir(), LOG_FILE_NAME);
+}
+
+/** Turn anything thrown/logged into a JSON-safe value. */
+export function normalizeMeta(value: unknown): unknown {
+  if (value instanceof Error) {
+    return { name: value.name, message: value.message, stack: value.stack };
+  }
+  if (value === undefined) return undefined;
   try {
-    fs.appendFileSync(path.join(getLogsDir(), "kiosk.log"), line + "\n");
-  } catch { /* non-fatal */ }
+    JSON.stringify(value);
+    return value;
+  } catch {
+    return String(value);
+  }
+}
+
+function write(level: LogLevel, message: string, meta?: unknown): void {
+  if (level === "debug" && process.env.NODE_ENV !== "development") return;
+
+  const ts = new Date().toISOString();
+  const entry: Record<string, unknown> = {
+    ts,
+    level,
+    app: "student-kiosk",
+    pid: process.pid,
+    msg: message,
+  };
+  const safeMeta = normalizeMeta(meta);
+  if (safeMeta !== undefined) entry["meta"] = safeMeta;
+
+  try {
+    const sink = level === "error" || level === "warn" ? console.error : console.log;
+    sink(`${ts} [${level.toUpperCase()}] ${message}`, safeMeta ?? "");
+  } catch {
+    /* stdout may be gone in a packaged app */
+  }
+
+  try {
+    fs.appendFileSync(getLogFilePath(), JSON.stringify(entry) + "\n");
+  } catch {
+    /* never let logging break the app */
+  }
 }
 
 export const logger = {
   debug: (msg: string, meta?: unknown) => write("debug", msg, meta),
-  info:  (msg: string, meta?: unknown) => write("info",  msg, meta),
-  warn:  (msg: string, meta?: unknown) => write("warn",  msg, meta),
+  info: (msg: string, meta?: unknown) => write("info", msg, meta),
+  warn: (msg: string, meta?: unknown) => write("warn", msg, meta),
   error: (msg: string, meta?: unknown) => write("error", msg, meta),
 };

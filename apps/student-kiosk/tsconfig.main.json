@@ -3,8 +3,8 @@
     "target": "ES2022",
     "module": "CommonJS",
     "lib": ["ES2022"],
-    "outDir": "dist/main",
-    "rootDir": "src/main",
+    "noEmit": true,
+    "rootDir": "src",
     "strict": true,
     "esModuleInterop": true,
     "skipLibCheck": true,
@@ -12,6 +12,6 @@
     "noUnusedLocals": false,
     "noUnusedParameters": false
   },
-  "include": ["src/main/**/*"],
+  "include": ["src/main/**/*", "src/preload.ts"],
   "exclude": ["node_modules", "dist"]
 }

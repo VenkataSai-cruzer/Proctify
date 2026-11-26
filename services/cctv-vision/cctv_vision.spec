@@ -10,13 +10,15 @@
 
 import sys
 import os
-from pathlib import Path
-
 block_cipher = None
 
 # SPEC is the absolute path of this .spec file (PyInstaller 6+)
 SPEC_DIR = os.path.dirname(os.path.abspath(SPEC))
-DIST_DIR = str(Path(SPEC_DIR).parent.parent / "dist-pyinstaller")
+
+# NOTE: PyInstaller ignores a `distpath=` argument on COLLECT (verified on
+# 6.22.x), so the output directory cannot be set here. build_bundle.sh and
+# build_bundle.ps1 pass `--distpath <repo-root>/dist-pyinstaller` and assert
+# the result, which electron-builder's extraResources depends on.
 
 # MediaPipe model — include if present, skip gracefully if not
 MODEL_PATH = os.path.join(SPEC_DIR, "models", "face_landmarker.task")
@@ -93,5 +95,4 @@ coll = COLLECT(
     upx=True,
     upx_exclude=[],
     name="cctv-vision",
-    distpath=DIST_DIR,
 )

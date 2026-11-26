@@ -34,6 +34,13 @@ extraResources:
       - "**/*.so*"
       - "**/*.dll"
 
+# Native addons and Prisma artefacts cannot be read from inside app.asar —
+# they are unpacked next to it and resolved through app.asar.unpacked.
+asarUnpack:
+  - "**/*.node"
+  - "**/node_modules/.prisma/**"
+  - "**/node_modules/@prisma/**"
+
 # ── GitHub Releases (teacher desktop) ─────────────────────────
 # electron-updater fetches latest.yml from the GitHub release page.
 # The in-app auto-updater in src/main/autoUpdater.ts will fall back

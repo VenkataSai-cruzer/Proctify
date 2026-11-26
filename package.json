@@ -1,7 +1,7 @@
 {
   "name": "secureassess",
   "homepage": "https://github.com/VenkataSai-cruzer/Proctify",
-  "version": "1.0.1",
+  "version": "1.1.0",
   "private": true,
   "workspaces": [
     "apps/*",
@@ -12,6 +12,7 @@
     "dev:teacher": "yarn workspace @secureassess/teacher-desktop dev",
     "dev:student": "yarn workspace @secureassess/student-kiosk dev",
     "dev:cctv": "cd services/cctv-vision && python src/main.py",
+    "build": "yarn build:shared && yarn workspace @secureassess/teacher-desktop build && yarn workspace @secureassess/student-kiosk build && yarn build:server",
     "build:shared": "yarn workspace @secureassess/shared build",
     "build:server": "yarn workspace @secureassess/server build",
     "build:teacher": "yarn workspace @secureassess/teacher-desktop build",
@@ -19,9 +20,11 @@
     "db:generate": "yarn workspace @secureassess/server db:generate",
     "db:migrate": "yarn workspace @secureassess/server db:migrate",
     "db:studio": "yarn workspace @secureassess/server db:studio",
-    "test:e2e": "tsx scripts/verify-e2e.ts"
+    "test:e2e": "tsx scripts/verify-e2e.ts",
+    "typecheck": "yarn workspace @secureassess/shared typecheck && yarn workspace @secureassess/server typecheck && yarn workspace @secureassess/teacher-desktop typecheck && yarn workspace @secureassess/student-kiosk typecheck"
   },
   "devDependencies": {
+    "esbuild": "^0.28.2",
     "tsx": "^4.16.0",
     "typescript": "^5.4.5"
   },

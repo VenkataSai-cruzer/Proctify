@@ -1682,6 +1682,7 @@ __metadata:
     concurrently: "npm:^8.2.2"
     electron: "npm:31.7.7"
     electron-builder: "npm:^24.13.3"
+    esbuild: "npm:^0.28.2"
     framer-motion: "npm:^11.2.13"
     lucide-react: "npm:^0.400.0"
     postcss: "npm:^8.4.38"
@@ -1726,6 +1727,7 @@ __metadata:
     electron-builder: "npm:^24.13.3"
     electron-store: "npm:8.2.0"
     electron-updater: "npm:^6.3.4"
+    esbuild: "npm:^0.28.2"
     framer-motion: "npm:^11.2.13"
     jszip: "npm:^3.10.1"
     lucide-react: "npm:^0.400.0"
@@ -4457,7 +4459,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"esbuild@npm:~0.28.0":
+"esbuild@npm:^0.28.2, esbuild@npm:~0.28.0":
   version: 0.28.2
   resolution: "esbuild@npm:0.28.2"
   dependencies:
@@ -7421,6 +7423,7 @@ __metadata:
   version: 0.0.0-use.local
   resolution: "secureassess@workspace:."
   dependencies:
+    esbuild: "npm:^0.28.2"
     tsx: "npm:^4.16.0"
     typescript: "npm:^5.4.5"
   languageName: unknown

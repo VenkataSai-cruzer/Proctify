@@ -18,11 +18,35 @@ import os from "os";
 import crypto from "crypto";
 import type { LockdownMode } from "@secureassess/shared";
 import { initTelemetry } from "./telemetry";
+import { installGlobalErrorHandlers } from "./crashGuard";
+import { logger } from "./logger";
+import { runSmokeTest } from "./smokeTest";
 
 const isDev = process.env.NODE_ENV === "development";
+const isSmokeTest = process.argv.includes("--smoke-test");
 
-// Dev only: disable sandbox for hot-reload compatibility
-if (!isDev) app.commandLine.appendSwitch("no-sandbox");
+// Install before anything else can throw so early failures still hit main.log
+installGlobalErrorHandlers();
+
+// Channels the smoke test expects to exist after IPC registration
+const KIOSK_IPC_CHANNELS = [
+  "kiosk:getHardwareToken",
+  "kiosk:getSystemNo",
+  "kiosk:getServerUrl",
+  "kiosk:getLockdownMode",
+  "kiosk:unlock",
+  "kiosk:setLockdownMode",
+  "kiosk:getEnvironmentCheck",
+];
+
+// The Chromium sandbox is only disabled when a headless CI runner cannot
+// provide it (Ubuntu runners have no setuid helper for chrome-sandbox).
+// Never disable it implicitly in a production kiosk.
+const sandboxDisabledForCi =
+  process.env["CI"] === "true" || process.env["ELECTRON_DISABLE_SANDBOX"] === "1";
+if (!isDev && sandboxDisabledForCi) {
+  app.commandLine.appendSwitch("no-sandbox");
+}
 app.commandLine.appendSwitch("disable-dev-shm-usage");
 
 let kioskWindow: BrowserWindow | null = null;
@@ -128,7 +152,7 @@ async function createExamWindow(mode: LockdownMode): Promise<void> {
     title: "SecureAssess — Exam",
     backgroundColor: "#F8FAFC",
     webPreferences: {
-      preload: path.join(__dirname, "../preload.js"),
+      preload: path.join(__dirname, "../preload/index.js"),
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,         // ← HARDENED: enforce sandbox
@@ -145,9 +169,11 @@ async function createExamWindow(mode: LockdownMode): Promise<void> {
       responseHeaders: {
         ...details.responseHeaders,
         "Content-Security-Policy": [
+          // connect-src must cover the configured lab server (any LAN host).
+          // script-src stays locked to 'self'.
           isDev
-            ? "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self' ws: wss: http://localhost:* http://secureassess-lab.local:*;"
-            : "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self' ws: wss: http://secureassess-lab.local:*;",
+            ? "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self' http: https: ws: wss:;"
+            : "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self' http: https: ws: wss:;",
         ],
       },
     });
@@ -274,20 +300,38 @@ function registerIpc(): void {
 
 // ── App lifecycle ─────────────────────────────────────────────
 app.whenReady().then(async () => {
+  // ── Packaged smoke test: boot services, verify layout, exit ──
+  if (isSmokeTest) {
+    registerIpc();
+    await runSmokeTest({
+      requiredIpcChannels: KIOSK_IPC_CHANNELS,
+      hardwareToken: getHardwareToken(),
+    });
+    return;
+  }
+
+  logger.info("main process ready", {
+    version: app.getVersion(),
+    packaged: app.isPackaged,
+    mode: currentLockdownMode,
+  });
+
   // ── Environment security scan ─────────────────────────────
   const vmCheck = detectVMEnvironment();
   const rdpCheck = detectRemoteDesktop();
   const multiMon = detectMultiMonitor();
 
   if (vmCheck.isVM) {
-    console.warn(`⚠ VM detected: ${vmCheck.vmType}. Entry allowed only if teacher enabled VM support.`);
+    logger.warn("VM environment detected", { vmType: vmCheck.vmType });
     // The renderer can read this via kiosk:getEnvironmentCheck and block/warn
   }
   if (rdpCheck.isRemote) {
-    console.warn(`⚠ Remote desktop detected: ${rdpCheck.tool}. Entry BLOCKED for exam integrity.`);
+    logger.warn("Remote desktop detected — entry blocked for exam integrity", { tool: rdpCheck.tool });
   }
   if (multiMon) {
-    console.warn(`⚠ Multiple monitors detected (${screen.getAllDisplays().length}). Secondary displays will be blocked.`);
+    logger.warn("Multiple monitors detected — secondary displays will be blocked", {
+      displayCount: screen.getAllDisplays().length,
+    });
   }
 
   powerBlockId = powerSaveBlocker.start("prevent-display-sleep");

@@ -1,15 +1,17 @@
 {
   "name": "@secureassess/student-kiosk",
   "homepage": "https://github.com/VenkataSai-cruzer/Proctify",
-  "version": "1.0.1",
+  "version": "1.1.0",
   "description": "SecureAssess Student Kiosk — Secure exam client with OS-level lockdown",
   "author": "SecureAssess <admin@secureassess.local>",
   "private": true,
   "main": "dist/main/index.js",
   "scripts": {
-    "dev": "concurrently \"vite\" \"wait-on http://localhost:5174 && electron .\"",
+    "dev": "node ../../scripts/build-electron.mjs . && concurrently \"vite\" \"wait-on http://localhost:5174 && electron .\"",
     "dev:renderer": "vite --port 5174",
-    "build": "tsc --project tsconfig.main.json && vite build",
+    "build:main": "node ../../scripts/build-electron.mjs .",
+    "build": "node ../../scripts/build-electron.mjs . && vite build",
+    "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.main.json",
     "package:win": "electron-builder --config electron-builder.yml --win",
     "package:linux": "electron-builder --config electron-builder.yml --linux",
     "package:all": "electron-builder --config electron-builder.yml --win --linux"
@@ -36,6 +38,7 @@
     "concurrently": "^8.2.2",
     "electron": "31.7.7",
     "electron-builder": "^24.13.3",
+    "esbuild": "^0.28.2",
     "framer-motion": "^11.2.13",
     "lucide-react": "^0.400.0",
     "postcss": "^8.4.38",

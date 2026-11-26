@@ -17,6 +17,13 @@ files:
   - dist/**/*
   - "!dist/renderer/**/*.map"
 
+# Native addons and Prisma artefacts cannot be read from inside app.asar —
+# they are unpacked next to it and resolved through app.asar.unpacked.
+asarUnpack:
+  - "**/*.node"
+  - "**/node_modules/.prisma/**"
+  - "**/node_modules/@prisma/**"
+
 # ── LAN update server (student kiosk stays on local network) ──
 # The kiosk checks the lab server for updates, not GitHub,
 # because lab PCs may have no internet access during exams.

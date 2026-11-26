@@ -88,6 +88,13 @@ export default function SettingsPage() {
                   {healthy ? "✓ Server reachable" : "✗ Server unreachable"}
                 </p>
               )}
+              <p className="text-[11px] text-slate-500 mt-2 leading-relaxed">
+                The SecureAssess server runs as its own process, not inside this app. On the lab host
+                start it with <code className="text-slate-400">yarn workspace @secureassess/server start</code>{" "}
+                (or <code className="text-slate-400">yarn dev:server</code> while developing), then point this
+                app at <code className="text-slate-400">http://&lt;lab-host&gt;:3000</code>. Servers announced on
+                the LAN are detected automatically at the login screen.
+              </p>
             </div>
 
             {/* Lab mode */}

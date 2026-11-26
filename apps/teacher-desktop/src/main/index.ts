@@ -16,14 +16,50 @@ import { initAutoUpdater } from "./autoUpdater";
 import { logger } from "./logger";
 import { initMDNSDiscovery } from "./mdnsDiscovery";
 import { registerIpcHandlers } from "./ipcHandlers";
-import { registerCctvLauncherIpc } from "./cctvLauncher";
+import {
+  disposeCctvProcess,
+  getCctvBinaryPath,
+  isCctvBinaryPresent,
+  registerCctvLauncherIpc,
+} from "./cctvLauncher";
 import { initTelemetry } from "./telemetry";
 import { registerDiagnosticsIpc } from "./diagnostics";
+import { installGlobalErrorHandlers } from "./crashGuard";
+import { runSmokeTest } from "./smokeTest";
 
+// electron-store is bundled into this file by scripts/build-electron.mjs
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const Store = require("electron-store");
 
 const isDev = process.env.NODE_ENV === "development";
+const isSmokeTest = process.argv.includes("--smoke-test");
+
+// Install before anything else can throw so early failures still hit main.log
+installGlobalErrorHandlers();
+
+// Channels the smoke test expects to exist after IPC registration
+const SMOKE_TEST_CHANNELS = [
+  "store:get",
+  "store:set",
+  "dialog:openFile",
+  "dialog:saveFile",
+  "dialog:openDirectory",
+  "fs:readFile",
+  "fs:writeFile",
+  "fs:openPath",
+  "pdf:extractText",
+  "projector:open",
+  "app:getVersion",
+  "app:getPlatform",
+  "app:getUserDataPath",
+  "app:getDbPath",
+  "app:getDatabaseUrl",
+  "cctv:start",
+  "cctv:stop",
+  "cctv:status",
+  "cctv:health",
+  "diagnostics:export",
+];
 
 // ── Allowed IPC frame origins ─────────────────────────────────
 const ALLOWED_FRAME_ORIGINS = new Set([
@@ -59,11 +95,11 @@ let mainWindow: BrowserWindow | null = null;
 let projectorWindow: BrowserWindow | null = null;
 
 // ── Pre-launch data safety checks ─────────────────────────────
-function runPreLaunchChecks(): void {
+function runPreLaunchChecks(): boolean {
   if (!ensureUserDataWritable()) {
     logger.error("userData directory is not writable — cannot continue");
     app.quit();
-    return;
+    return false;
   }
 
   // Run startup backup before anything else touches the DB
@@ -79,6 +115,15 @@ function runPreLaunchChecks(): void {
     process.env["DATABASE_URL"] = getDatabaseUrl();
     logger.info("DATABASE_URL set to userData", { path: getDatabaseUrl() });
   }
+
+  return true;
+}
+
+/** IPC surface for app paths/versions — shared by the normal and smoke-test boot. */
+function registerAppInfoIpc(): void {
+  ipcMain.handle("app:getUserDataPath", () => getUserDataDir());
+  ipcMain.handle("app:getDbPath", () => getDbPath());
+  ipcMain.handle("app:getDatabaseUrl", () => getDatabaseUrl());
 }
 
 // ── Window creation ───────────────────────────────────────────
@@ -94,7 +139,7 @@ async function createMainWindow(): Promise<void> {
     titleBarStyle: process.platform === "darwin" ? "hiddenInset" : "default",
     backgroundColor: "#0B1120",
     webPreferences: {
-      preload: path.join(__dirname, "../preload.js"),
+      preload: path.join(__dirname, "../preload/index.js"),
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,          // ← HARDENED
@@ -114,9 +159,12 @@ async function createMainWindow(): Promise<void> {
       responseHeaders: {
         ...details.responseHeaders,
         "Content-Security-Policy": [
+          // connect-src must cover the configured lab server (any LAN host,
+          // or localhost when this machine runs the server). script-src stays
+          // locked to 'self'.
           isDev
-            ? "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self' ws: wss: http://localhost:* http://secureassess-lab.local:*;"
-            : "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self' ws: wss: http://secureassess-lab.local:*;",
+            ? "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self' http: https: ws: wss:;"
+            : "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self' http: https: ws: wss:;",
         ],
       },
     });
@@ -150,7 +198,7 @@ async function createProjectorWindow(): Promise<void> {
     fullscreen: true,
     backgroundColor: "#0B1120",
     webPreferences: {
-      preload: path.join(__dirname, "../preload.js"),
+      preload: path.join(__dirname, "../preload/index.js"),
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,          // ← HARDENED
@@ -169,14 +217,43 @@ async function createProjectorWindow(): Promise<void> {
 
 // ── App lifecycle ─────────────────────────────────────────────
 app.whenReady().then(async () => {
-  runPreLaunchChecks();
+  const preLaunchOk = runPreLaunchChecks();
+  if (!preLaunchOk && !isSmokeTest) return; // app.quit() already requested
+
   initTelemetry();
+
+  // ── Packaged smoke test: boot services, verify layout, exit ──
+  if (isSmokeTest) {
+    registerIpcHandlers(ipcMain, store, createProjectorWindow);
+    registerCctvLauncherIpc(() => mainWindow);
+    registerDiagnosticsIpc();
+    registerAppInfoIpc();
+
+    await runSmokeTest({
+      store,
+      requiredIpcChannels: SMOKE_TEST_CHANNELS,
+      cctv: {
+        expected: !isDev,
+        binaryPath: getCctvBinaryPath(),
+        present: isCctvBinaryPresent(),
+      },
+    });
+    return;
+  }
+
+  logger.info("main process ready", {
+    version: app.getVersion(),
+    packaged: app.isPackaged,
+    serverUrl: store.get("serverUrl"),
+  });
+
   await createMainWindow();
+  logger.info("main window created");
 
   registerIpcHandlers(ipcMain, store, createProjectorWindow);
 
-  // CCTV service launcher (spawn bundled PyInstaller binary)
-  registerCctvLauncherIpc(mainWindow!);
+  // CCTV service supervisor (spawn bundled PyInstaller binary)
+  registerCctvLauncherIpc(() => mainWindow);
 
   // 1-Click Diagnostics ZIP exporter
   registerDiagnosticsIpc();
@@ -194,9 +271,7 @@ app.whenReady().then(async () => {
   }
 
   // Expose userData path to renderer for display in Settings
-  ipcMain.handle("app:getUserDataPath", () => getUserDataDir());
-  ipcMain.handle("app:getDbPath",       () => getDbPath());
-  ipcMain.handle("app:getDatabaseUrl",  () => getDatabaseUrl());
+  registerAppInfoIpc();
 
   app.on("activate", async () => {
     if (BrowserWindow.getAllWindows().length === 0) await createMainWindow();
@@ -210,6 +285,7 @@ app.on("window-all-closed", () => {
 app.on("before-quit", () => {
   const size = mainWindow?.getSize();
   if (size) store.set("windowBounds", { width: size[0], height: size[1] });
+  disposeCctvProcess();
 });
 
 app.on("web-contents-created", (_event, contents) => {

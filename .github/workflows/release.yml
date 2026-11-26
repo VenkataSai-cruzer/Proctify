@@ -48,13 +48,10 @@ jobs:
 
       - name: Archive CCTV bundle (tar.gz preserves +x permissions)
         run: |
-          # build_bundle.sh may emit into services/cctv-vision/dist-pyinstaller or
-          # services/cctv-vision/dist depending on where PyInstaller resolves
-          # distpath, so locate the bundle instead of assuming the repo root.
-          BUNDLE_DIR=$(find . -maxdepth 4 -type d -name "cctv-vision" \( -path "*/dist-pyinstaller/*" -o -path "*/dist/*" \) | head -n 1)
-          echo "Found bundle at: $BUNDLE_DIR"
-          test -n "$BUNDLE_DIR"
-          tar -czf cctv-vision-linux.tar.gz -C "$(dirname "$BUNDLE_DIR")" cctv-vision
+          # build_bundle.sh writes straight to the canonical repo-root path,
+          # which is exactly where electron-builder's extraResources looks.
+          test -x dist-pyinstaller/cctv-vision/cctv-vision
+          tar -czf cctv-vision-linux.tar.gz -C dist-pyinstaller cctv-vision
           tar -tzf cctv-vision-linux.tar.gz | head -n 5
 
       - uses: actions/upload-artifact@v4
@@ -87,25 +84,6 @@ jobs:
         shell: pwsh
         run: .\services\cctv-vision\build_bundle.ps1
 
-      - name: Stage CCTV bundle for electron-builder
-        shell: pwsh
-        run: |
-          # cctv_vision.spec's distpath resolves to the repo root, but PyInstaller
-          # actually emits to services/cctv-vision/dist, so electron-builder's
-          # extraResources (../../dist-pyinstaller/cctv-vision) would find nothing
-          # and the installer would ship without the vision binary.
-          $bundle = Get-ChildItem -Path . -Directory -Recurse -Depth 4 -Filter "cctv-vision" |
-            Where-Object { $_.Parent.Name -in @("dist-pyinstaller", "dist") } |
-            Select-Object -First 1
-          if (-not $bundle) { throw "No cctv-vision bundle found under dist/ or dist-pyinstaller/" }
-          Write-Host "Found bundle at: $($bundle.FullName)"
-          New-Item -ItemType Directory -Force -Path "dist-pyinstaller" | Out-Null
-          Copy-Item -LiteralPath $bundle.FullName -Destination "dist-pyinstaller" -Recurse -Force
-          $exe = "dist-pyinstaller\cctv-vision\cctv-vision.exe"
-          if (-not (Test-Path $exe)) { throw "Staged bundle is missing $exe" }
-          $files = (Get-ChildItem "dist-pyinstaller\cctv-vision" -Recurse -File | Measure-Object).Count
-          Write-Host "Staged $files files; $exe = $((Get-Item $exe).Length) bytes"
-
       - name: Install dependencies
         run: yarn install --immutable
 
@@ -115,10 +93,13 @@ jobs:
       - name: Generate Prisma client
         run: yarn workspace @secureassess/server db:generate
 
-      - name: Build app bundles
+      - name: Typecheck all workspaces
+        run: yarn typecheck
+
+      - name: Build app bundles (esbuild main/preload + vite renderer)
         run: |
-          yarn workspace @secureassess/teacher-desktop tsc --project tsconfig.main.json
-          yarn workspace @secureassess/student-kiosk   tsc --project tsconfig.main.json
+          yarn workspace @secureassess/teacher-desktop build:main
+          yarn workspace @secureassess/student-kiosk   build:main
           yarn workspace @secureassess/teacher-desktop vite build
           yarn workspace @secureassess/student-kiosk   vite build
 
@@ -140,6 +121,21 @@ jobs:
           $exe = "apps\teacher-desktop\release\win-unpacked\resources\cctv-vision\cctv-vision.exe"
           if (-not (Test-Path $exe)) { throw "CCTV bundle missing from packaged app: $exe" }
           Write-Host "OK: $exe = $((Get-Item $exe).Length) bytes"
+
+      - name: Smoke test packaged binaries
+        shell: pwsh
+        run: |
+          $targets = @(
+            "apps\teacher-desktop\release\win-unpacked\SecureAssess Teacher.exe",
+            "apps\student-kiosk\release\win-unpacked\SecureAssess Student Kiosk.exe"
+          )
+          foreach ($exe in $targets) {
+            if (-not (Test-Path $exe)) { throw "Missing unpacked binary: $exe" }
+            Write-Host "== $exe --smoke-test"
+            $proc = Start-Process -FilePath $exe -ArgumentList "--smoke-test" -Wait -PassThru
+            Write-Host "== exit code: $($proc.ExitCode)"
+            if ($proc.ExitCode -ne 0) { throw "Smoke test failed for $exe (exit $($proc.ExitCode))" }
+          }
 
       - name: Upload Windows installer artifacts
         uses: actions/upload-artifact@v4
@@ -173,7 +169,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y libgl1 libglib2.0-0 rpm libfuse2 \
-            libgtk-3-dev libnss3 libxss1 libxtst6 fakeroot dpkg
+            libgtk-3-dev libnss3 libxss1 libxtst6 fakeroot dpkg xvfb
 
       - uses: actions/download-artifact@v4
         with:
@@ -183,14 +179,11 @@ jobs:
         run: |
           # electron-builder.yml (teacher-desktop) reads
           # ../../dist-pyinstaller/cctv-vision relative to apps/teacher-desktop,
-          # i.e. the repo root. Populate both locations so the bundle is found
-          # no matter how the extraResources relative path is resolved.
-          mkdir -p dist-pyinstaller services/cctv-vision/dist-pyinstaller
+          # i.e. the repo root.
+          mkdir -p dist-pyinstaller
           tar -xzf cctv-vision-linux.tar.gz -C dist-pyinstaller
-          cp -a dist-pyinstaller/cctv-vision services/cctv-vision/dist-pyinstaller/
-          chmod +x dist-pyinstaller/cctv-vision/cctv-vision services/cctv-vision/dist-pyinstaller/cctv-vision/cctv-vision
+          chmod +x dist-pyinstaller/cctv-vision/cctv-vision
           test -x dist-pyinstaller/cctv-vision/cctv-vision
-          test -x services/cctv-vision/dist-pyinstaller/cctv-vision/cctv-vision
 
       - name: Install dependencies
         run: yarn install --immutable
@@ -201,10 +194,13 @@ jobs:
       - name: Generate Prisma client
         run: yarn workspace @secureassess/server db:generate
 
-      - name: Build app bundles
+      - name: Typecheck all workspaces
+        run: yarn typecheck
+
+      - name: Build app bundles (esbuild main/preload + vite renderer)
         run: |
-          yarn workspace @secureassess/teacher-desktop tsc --project tsconfig.main.json
-          yarn workspace @secureassess/student-kiosk   tsc --project tsconfig.main.json
+          yarn workspace @secureassess/teacher-desktop build:main
+          yarn workspace @secureassess/student-kiosk   build:main
           yarn workspace @secureassess/teacher-desktop vite build
           yarn workspace @secureassess/student-kiosk   vite build
 
@@ -217,6 +213,24 @@ jobs:
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: "false"
         run: yarn workspace @secureassess/student-kiosk electron-builder --config electron-builder.yml --linux --publish never
+
+      - name: Smoke test packaged binaries (headless)
+        env:
+          CI: "true"
+          ELECTRON_DISABLE_SANDBOX: "1"
+        run: |
+          for bin in \
+            apps/teacher-desktop/release/linux-unpacked/secureassess-teacher \
+            apps/student-kiosk/release/linux-unpacked/secureassess-student-kiosk; do
+            if [ ! -x "$bin" ]; then
+              echo "::error::missing unpacked binary $bin"
+              ls -la "$(dirname "$bin")" || true
+              exit 1
+            fi
+            echo "== $bin --smoke-test"
+            xvfb-run -a "$bin" --smoke-test
+            echo "== passed: $bin"
+          done
 
       - name: Upload Linux installer artifacts
         uses: actions/upload-artifact@v4
