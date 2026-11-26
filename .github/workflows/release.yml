@@ -103,6 +103,12 @@ jobs:
           yarn workspace @secureassess/teacher-desktop vite build
           yarn workspace @secureassess/student-kiosk   vite build
 
+      # The teacher app ships the API server as resources/server/bundle.cjs
+      # (extraResources). Without this the embedded server is missing and the
+      # packaged smoke test fails its embedded-server check.
+      - name: Build embedded API server bundle
+        run: yarn workspace @secureassess/server build:bundle
+
       - name: Package Teacher Desktop (Windows - no publish)
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: "false"
@@ -206,6 +212,10 @@ jobs:
           yarn workspace @secureassess/student-kiosk   build:main
           yarn workspace @secureassess/teacher-desktop vite build
           yarn workspace @secureassess/student-kiosk   vite build
+
+      # Required by the teacher app's extraResources (resources/server/bundle.cjs).
+      - name: Build embedded API server bundle
+        run: yarn workspace @secureassess/server build:bundle
 
       - name: Package Teacher Desktop (Linux - no publish)
         env:
