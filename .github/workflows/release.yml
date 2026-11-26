@@ -148,14 +148,15 @@ jobs:
         with:
           name: windows-installers
           # Each app publishes its own channel manifest (teacher.yml /
-          # student.yml), so both must be uploaded.
+          # student.yml), so both must be uploaded. The glob is deliberately
+          # narrow: release/*.yml would also pick up builder-debug.yml.
           path: |
             apps/teacher-desktop/release/*.exe
             apps/teacher-desktop/release/*.exe.blockmap
-            apps/teacher-desktop/release/*.yml
+            apps/teacher-desktop/release/teacher*.yml
             apps/student-kiosk/release/*.exe
             apps/student-kiosk/release/*.exe.blockmap
-            apps/student-kiosk/release/*.yml
+            apps/student-kiosk/release/student*.yml
           if-no-files-found: error
           retention-days: 1
 
@@ -249,14 +250,14 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: linux-installers
-          # Channel manifests: teacher-linux.yml / student-linux.yml
+          # Channel manifests only: teacher-linux.yml / student-linux.yml
           path: |
             apps/teacher-desktop/release/*.AppImage
             apps/teacher-desktop/release/*.deb
-            apps/teacher-desktop/release/*.yml
+            apps/teacher-desktop/release/teacher*.yml
             apps/student-kiosk/release/*.AppImage
             apps/student-kiosk/release/*.deb
-            apps/student-kiosk/release/*.yml
+            apps/student-kiosk/release/student*.yml
           if-no-files-found: error
           retention-days: 1
 
