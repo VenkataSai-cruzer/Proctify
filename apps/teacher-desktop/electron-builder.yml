@@ -62,6 +62,7 @@ nsis:
 
 # Linux
 linux:
+  executableName: secureassess-teacher
   target:
     - AppImage
     - deb

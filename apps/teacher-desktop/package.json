@@ -1,5 +1,6 @@
 {
   "name": "@secureassess/teacher-desktop",
+  "homepage": "https://github.com/VenkataSai-cruzer/Proctify",
   "version": "1.0.0",
   "description": "SecureAssess Teacher Desktop — Exam management and live proctoring console",
   "author": "SecureAssess <admin@secureassess.local>",

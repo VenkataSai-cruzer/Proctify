@@ -6,6 +6,9 @@ appId: com.secureassess.student
 productName: SecureAssess Student Kiosk
 copyright: "Copyright © 2024 SecureAssess"
 
+# Security: apply @electron/fuses after packing
+afterPack: ./afterPack.js
+
 directories:
   buildResources: assets
   output: release
@@ -37,6 +40,7 @@ nsis:
   shortcutName: SecureAssess Kiosk
 
 linux:
+  executableName: secureassess-student-kiosk
   target:
     - AppImage
     - deb
