@@ -41,6 +41,7 @@ nsis:
 
 linux:
   executableName: secureassess-student-kiosk
+  artifactName: "secureassess-student-kiosk-${version}-${arch}.${ext}"
   target:
     - AppImage
     - deb
@@ -48,6 +49,7 @@ linux:
   category: Education
 
 deb:
+  packageName: secureassess-student-kiosk
   depends:
     - libgtk-3-0
     - libnss3

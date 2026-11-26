@@ -63,6 +63,7 @@ nsis:
 # Linux
 linux:
   executableName: secureassess-teacher
+  artifactName: "secureassess-teacher-${version}-${arch}.${ext}"
   target:
     - AppImage
     - deb
@@ -72,6 +73,7 @@ linux:
   synopsis: Secure Examination & Proctoring Platform — Teacher Console
 
 deb:
+  packageName: secureassess-teacher
   depends:
     - libgtk-3-0
     - libnotify4
