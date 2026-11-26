@@ -1,7 +1,7 @@
 {
   "name": "@secureassess/student-kiosk",
   "homepage": "https://github.com/VenkataSai-cruzer/Proctify",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "SecureAssess Student Kiosk — Secure exam client with OS-level lockdown",
   "author": "SecureAssess <admin@secureassess.local>",
   "private": true,

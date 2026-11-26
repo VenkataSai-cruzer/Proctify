@@ -1,7 +1,7 @@
 {
   "name": "secureassess",
   "homepage": "https://github.com/VenkataSai-cruzer/Proctify",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "private": true,
   "workspaces": [
     "apps/*",

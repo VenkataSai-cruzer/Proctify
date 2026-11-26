@@ -1,7 +1,7 @@
 {
   "name": "@secureassess/teacher-desktop",
   "homepage": "https://github.com/VenkataSai-cruzer/Proctify",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "SecureAssess Teacher Desktop — Exam management and live proctoring console",
   "author": "SecureAssess <admin@secureassess.local>",
   "private": true,
@@ -23,7 +23,7 @@
     "archiver": "^7.0.1",
     "bonjour-service": "^1.2.1",
     "clsx": "^2.1.1",
-    "electron-store": "^10.0.0",
+    "electron-store": "8.2.0",
     "electron-updater": "^6.3.4",
     "framer-motion": "^11.2.13",
     "jszip": "^3.10.1",
