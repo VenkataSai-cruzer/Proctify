@@ -87,6 +87,25 @@ jobs:
         shell: pwsh
         run: .\services\cctv-vision\build_bundle.ps1
 
+      - name: Stage CCTV bundle for electron-builder
+        shell: pwsh
+        run: |
+          # cctv_vision.spec's distpath resolves to the repo root, but PyInstaller
+          # actually emits to services/cctv-vision/dist, so electron-builder's
+          # extraResources (../../dist-pyinstaller/cctv-vision) would find nothing
+          # and the installer would ship without the vision binary.
+          $bundle = Get-ChildItem -Path . -Directory -Recurse -Depth 4 -Filter "cctv-vision" |
+            Where-Object { $_.Parent.Name -in @("dist-pyinstaller", "dist") } |
+            Select-Object -First 1
+          if (-not $bundle) { throw "No cctv-vision bundle found under dist/ or dist-pyinstaller/" }
+          Write-Host "Found bundle at: $($bundle.FullName)"
+          New-Item -ItemType Directory -Force -Path "dist-pyinstaller" | Out-Null
+          Copy-Item -LiteralPath $bundle.FullName -Destination "dist-pyinstaller" -Recurse -Force
+          $exe = "dist-pyinstaller\cctv-vision\cctv-vision.exe"
+          if (-not (Test-Path $exe)) { throw "Staged bundle is missing $exe" }
+          $files = (Get-ChildItem "dist-pyinstaller\cctv-vision" -Recurse -File | Measure-Object).Count
+          Write-Host "Staged $files files; $exe = $((Get-Item $exe).Length) bytes"
+
       - name: Install dependencies
         run: yarn install --immutable
 
@@ -114,6 +133,13 @@ jobs:
           CSC_IDENTITY_AUTO_DISCOVERY: "false"
           ELECTRON_OVERRIDE_DIST_PATH: ${{ github.workspace }}/node_modules/electron/dist
         run: yarn workspace @secureassess/student-kiosk electron-builder --config electron-builder.yml --win --publish never
+
+      - name: Verify CCTV bundle packaged in the teacher installer
+        shell: pwsh
+        run: |
+          $exe = "apps\teacher-desktop\release\win-unpacked\resources\cctv-vision\cctv-vision.exe"
+          if (-not (Test-Path $exe)) { throw "CCTV bundle missing from packaged app: $exe" }
+          Write-Host "OK: $exe = $((Get-Item $exe).Length) bytes"
 
       - name: Upload Windows installer artifacts
         uses: actions/upload-artifact@v4
