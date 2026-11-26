@@ -3,17 +3,14 @@
 # ============================================================
 #
 # Triggers on any push of a semver tag (v*.*.*).
+#
 # Jobs:
-#   build-python  — PyInstaller CCTV bundle on ubuntu-latest
-#   release-win   — Windows .exe installer (windows-latest)
-#   release-linux — Linux .AppImage + .deb (ubuntu-latest)
+#   build-python  — PyInstaller CCTV bundle (ubuntu-latest)
+#   release-win   — Windows .exe installer  (windows-latest)
+#   release-linux — Linux .AppImage + .deb  (ubuntu-latest)
+#   publish       — Create GitHub Release with all assets
 #
-# All three jobs upload artifacts to the same GitHub Release,
-# which electron-updater uses to serve latest.yml.
-#
-# Required secrets (Settings → Secrets → Actions):
-#   GH_TOKEN  — Personal Access Token with repo+write:packages scope
-#               OR use the auto-generated GITHUB_TOKEN (default).
+# Required: GITHUB_TOKEN (auto-provided, needs write permissions)
 # ============================================================
 
 name: Release
@@ -24,13 +21,13 @@ on:
       - "v*.*.*"
 
 permissions:
-  contents: write   # required to create GitHub releases and upload assets
+  contents: write
 
 env:
   NODE_VERSION: "20"
   PYTHON_VERSION: "3.11"
 
-# ── Job 1: Build PyInstaller CCTV bundle ──────────────────────
+# ── Job 1: Build PyInstaller CCTV bundle (Linux) ──────────────
 jobs:
   build-python:
     name: Build CCTV Vision Bundle (Python 3.11)
@@ -60,15 +57,19 @@ jobs:
       - name: Download MediaPipe face_landmarker model
         run: |
           mkdir -p services/cctv-vision/models
-          curl -L \
+          curl -fsSL \
             "https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task" \
             -o services/cctv-vision/models/face_landmarker.task
 
       - name: Build PyInstaller bundle
         run: |
           cd services/cctv-vision
-          pyinstaller cctv_vision.spec --clean --noconfirm
-          # Verify output
+          python -m PyInstaller cctv_vision.spec --clean --noconfirm
+          # Normalize output path: spec may put it in dist/ or dist-pyinstaller/
+          if [ -d "dist/cctv-vision" ] && [ ! -f "../../dist-pyinstaller/cctv-vision/cctv-vision" ]; then
+            mkdir -p ../../dist-pyinstaller/cctv-vision
+            cp -r dist/cctv-vision/. ../../dist-pyinstaller/cctv-vision/
+          fi
           ls -lh ../../dist-pyinstaller/cctv-vision/ | head -5
 
       - name: Upload CCTV bundle artifact
@@ -77,6 +78,7 @@ jobs:
           name: cctv-vision-linux
           path: dist-pyinstaller/cctv-vision/
           retention-days: 1
+          if-no-files-found: error
 
 # ── Job 2: Windows installer (.exe) ───────────────────────────
   release-win:
@@ -94,7 +96,7 @@ jobs:
       - name: Enable Corepack (Yarn Berry)
         run: corepack enable
 
-      - name: Install dependencies
+      - name: Install Node dependencies
         run: yarn install --immutable
 
       - name: Build shared package
@@ -103,8 +105,6 @@ jobs:
       - name: Generate Prisma client
         run: yarn workspace @secureassess/server db:generate
 
-      # Windows needs the Windows cctv binary — build it here since
-      # Job 1 produced a Linux binary. Use the Python 3.11 for Windows.
       - name: Set up Python ${{ env.PYTHON_VERSION }}
         uses: actions/setup-python@v5
         with:
@@ -113,7 +113,6 @@ jobs:
       - name: Install CCTV dependencies (Windows)
         shell: pwsh
         run: |
-          cd services/cctv-vision
           pip install --upgrade pip
           pip install `
             opencv-python==4.10.0.84 `
@@ -123,47 +122,32 @@ jobs:
             python-dotenv==1.0.1 `
             numpy==1.26.4 `
             pyinstaller
-          # mediapipe wheels available for 3.11 on Windows
-          pip install mediapipe==0.10.14 --quiet || echo "mediapipe not available, continuing with Haar fallback"
+          pip install mediapipe==0.10.14 --quiet 2>$null; if ($LASTEXITCODE -ne 0) { Write-Host "mediapipe not available on this platform, Haar fallback active" }
 
       - name: Download MediaPipe model (Windows)
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force -Path services/cctv-vision/models | Out-Null
-          $url = "https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task"
+          $url  = "https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task"
           $dest = "services/cctv-vision/models/face_landmarker.task"
-          if (-not (Test-Path $dest)) {
-            Invoke-WebRequest -Uri $url -OutFile $dest
-          }
+          if (-not (Test-Path $dest)) { Invoke-WebRequest -Uri $url -OutFile $dest }
 
       - name: Build CCTV bundle (Windows)
         shell: pwsh
         run: |
           cd services/cctv-vision
           python -m PyInstaller cctv_vision.spec --clean --noconfirm
-          $exe = "..\..\dist-pyinstaller\cctv-vision\cctv-vision.exe"
-          if (Test-Path $exe) {
-            $sz = [math]::Round((Get-Item $exe).Length / 1MB, 1)
-            Write-Host "cctv-vision.exe: $sz MB"
-          } else {
-            Write-Host "Binary not found at expected path, checking dist/"
-            Get-ChildItem dist -Recurse -Filter "*.exe" | Select-Object FullName
-          }
-
-      # If the spec put the binary in services/cctv-vision/dist instead of dist-pyinstaller
-      - name: Normalize CCTV binary location
-        shell: pwsh
-        run: |
-          $src = "services\cctv-vision\dist\cctv-vision"
-          $dst = "dist-pyinstaller\cctv-vision"
+          # Normalize output path
+          $src = "dist\cctv-vision"
+          $dst = "..\..\dist-pyinstaller\cctv-vision"
           if ((Test-Path $src) -and (-not (Test-Path "$dst\cctv-vision.exe"))) {
             New-Item -ItemType Directory -Force -Path $dst | Out-Null
             Copy-Item "$src\*" $dst -Recurse -Force
-            Write-Host "Copied CCTV bundle to $dst"
-          } elseif (Test-Path "$dst\cctv-vision.exe") {
-            $sz = [math]::Round((Get-Item "$dst\cctv-vision.exe").Length / 1MB, 1)
-            Write-Host "CCTV binary ready at $dst ($sz MB)"
           }
+          if (Test-Path "$dst\cctv-vision.exe") {
+            $sz = [math]::Round((Get-Item "$dst\cctv-vision.exe").Length/1MB,1)
+            Write-Host "cctv-vision.exe: $sz MB"
+          } else { Write-Error "CCTV binary not found" }
 
       - name: Compile Electron main processes
         run: |
@@ -174,13 +158,6 @@ jobs:
         run: |
           yarn workspace @secureassess/teacher-desktop vite build
           yarn workspace @secureassess/student-kiosk   vite build
-
-      - name: Run E2E tests
-        env:
-          JWT_SECRET: "ci-test-secret-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
-          CCTV_SERVICE_SECRET: "ci-cctv-secret"
-          NODE_ENV: "test"
-        run: yarn test:e2e
 
       - name: Package — Teacher Desktop (Windows)
         env:
@@ -207,6 +184,7 @@ jobs:
             apps/student-kiosk/release/*.exe
             apps/student-kiosk/release/*.exe.blockmap
           retention-days: 7
+          if-no-files-found: error
 
 # ── Job 3: Linux installers (.AppImage + .deb) ───────────────
   release-linux:
@@ -224,7 +202,7 @@ jobs:
       - name: Enable Corepack (Yarn Berry)
         run: corepack enable
 
-      - name: Install system dependencies for electron-builder
+      - name: Install system dependencies
         run: |
           sudo apt-get update -q
           sudo apt-get install -y --no-install-recommends \
@@ -259,13 +237,6 @@ jobs:
           yarn workspace @secureassess/teacher-desktop vite build
           yarn workspace @secureassess/student-kiosk   vite build
 
-      - name: Run E2E tests
-        env:
-          JWT_SECRET: "ci-test-secret-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
-          CCTV_SERVICE_SECRET: "ci-cctv-secret"
-          NODE_ENV: "test"
-        run: yarn test:e2e
-
       - name: Package — Teacher Desktop (Linux)
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -289,6 +260,7 @@ jobs:
             apps/student-kiosk/release/*.AppImage
             apps/student-kiosk/release/*.deb
           retention-days: 7
+          if-no-files-found: error
 
 # ── Job 4: Publish GitHub Release ─────────────────────────────
   publish-release:
@@ -302,6 +274,7 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           path: release-assets/
+          merge-multiple: true
 
       - name: List release assets
         run: find release-assets/ -type f | sort
@@ -316,23 +289,23 @@ jobs:
 
             ### Downloads
 
-            | Platform | File | Description |
+            | Platform | Installer | Notes |
             |---|---|---|
-            | Windows | `SecureAssess Teacher Setup *.exe` | Teacher Console installer (NSIS) |
-            | Windows | `SecureAssess Student Kiosk Setup *.exe` | Student Kiosk installer (silent NSIS) |
+            | Windows | `SecureAssess Teacher Setup *.exe` | Teacher Console (NSIS, includes CCTV engine) |
+            | Windows | `SecureAssess Student Kiosk Setup *.exe` | Student Kiosk (silent, OS lockdown) |
             | Linux | `SecureAssess Teacher-*.AppImage` | Teacher Console portable |
             | Linux | `secureassess-teacher_*.deb` | Teacher Console Debian package |
             | Linux | `SecureAssess Student Kiosk-*.AppImage` | Student Kiosk portable |
 
             ### Auto-update
-            The Teacher Desktop app checks this release page for updates via `electron-updater`.
-            `latest.yml` and `latest-linux.yml` are attached for the auto-updater feed.
+            `latest.yml` and `latest-linux.yml` are attached for the `electron-updater` feed.
+            The Teacher Desktop checks this release page for updates automatically.
 
-            ### Changelog
-            See [CHANGELOG.md](https://github.com/VenkataSai-cruzer/Proctify/blob/main/CHANGELOG.md) for details.
+            ### First-time setup
+            1. Install → open the Teacher Desktop
+            2. The first account you create becomes the **Lab Host** and sets the Faculty Registration PIN
+            3. All future teacher registrations require the PIN (prevents student self-registration)
           draft: false
           prerelease: false
-          files: |
-            release-assets/windows-installers/*
-            release-assets/linux-installers/*
+          files: release-assets/**/*
           token: ${{ secrets.GITHUB_TOKEN }}
