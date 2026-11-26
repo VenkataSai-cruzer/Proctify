@@ -47,7 +47,15 @@ jobs:
         run: bash services/cctv-vision/build_bundle.sh
 
       - name: Archive CCTV bundle (tar.gz preserves +x permissions)
-        run: tar -czf cctv-vision-linux.tar.gz -C dist-pyinstaller cctv-vision
+        run: |
+          # build_bundle.sh may emit into services/cctv-vision/dist-pyinstaller or
+          # services/cctv-vision/dist depending on where PyInstaller resolves
+          # distpath, so locate the bundle instead of assuming the repo root.
+          BUNDLE_DIR=$(find . -maxdepth 4 -type d -name "cctv-vision" \( -path "*/dist-pyinstaller/*" -o -path "*/dist/*" \) | head -n 1)
+          echo "Found bundle at: $BUNDLE_DIR"
+          test -n "$BUNDLE_DIR"
+          tar -czf cctv-vision-linux.tar.gz -C "$(dirname "$BUNDLE_DIR")" cctv-vision
+          tar -tzf cctv-vision-linux.tar.gz | head -n 5
 
       - uses: actions/upload-artifact@v4
         with:
@@ -147,9 +155,16 @@ jobs:
 
       - name: Extract CCTV bundle with executable permissions intact
         run: |
-          mkdir -p dist-pyinstaller
+          # electron-builder.yml (teacher-desktop) reads
+          # ../../dist-pyinstaller/cctv-vision relative to apps/teacher-desktop,
+          # i.e. the repo root. Populate both locations so the bundle is found
+          # no matter how the extraResources relative path is resolved.
+          mkdir -p dist-pyinstaller services/cctv-vision/dist-pyinstaller
           tar -xzf cctv-vision-linux.tar.gz -C dist-pyinstaller
-          chmod +x dist-pyinstaller/cctv-vision/cctv-vision
+          cp -a dist-pyinstaller/cctv-vision services/cctv-vision/dist-pyinstaller/
+          chmod +x dist-pyinstaller/cctv-vision/cctv-vision services/cctv-vision/dist-pyinstaller/cctv-vision/cctv-vision
+          test -x dist-pyinstaller/cctv-vision/cctv-vision
+          test -x services/cctv-vision/dist-pyinstaller/cctv-vision/cctv-vision
 
       - name: Install dependencies
         run: yarn install --immutable
