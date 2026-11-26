@@ -307,5 +307,11 @@ jobs:
             3. All future teacher registrations require the PIN (prevents student self-registration)
           draft: false
           prerelease: false
-          files: release-assets/**/*
+          files: |
+            release-assets/**/*.exe
+            release-assets/**/*.exe.blockmap
+            release-assets/**/*.AppImage
+            release-assets/**/*.deb
+            release-assets/**/latest.yml
+            release-assets/**/latest-linux.yml
           token: ${{ secrets.GITHUB_TOKEN }}
