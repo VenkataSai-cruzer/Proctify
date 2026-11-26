@@ -2,15 +2,14 @@
 # SecureAssess — Automated Cross-Platform Release Pipeline
 # ============================================================
 #
-# Triggers on any push of a semver tag (v*.*.*).
+# Build-then-publish model:
+#   build-cctv-linux — PyInstaller CCTV bundle, archived as .tar.gz
+#   build-windows    — Windows .exe installers (never publishes)
+#   build-linux      — Linux .AppImage + .deb installers (never publishes)
+#   publish          — single atomic GitHub Release upload
 #
-# Jobs:
-#   build-python  — PyInstaller CCTV bundle (ubuntu-latest)
-#   release-win   — Windows .exe installer  (windows-latest)
-#   release-linux — Linux .AppImage + .deb  (ubuntu-latest)
-#   publish       — Create GitHub Release with all assets
-#
-# Required: GITHUB_TOKEN (auto-provided, needs write permissions)
+# electron-builder is always run with --publish never so the
+# platform jobs never race each other on the GitHub Release.
 # ============================================================
 
 name: Release
@@ -18,85 +17,69 @@ name: Release
 on:
   push:
     tags:
-      - "v*.*.*"
+      - "v*"
 
 permissions:
   contents: write
 
 env:
-  NODE_VERSION: "20"
+  NODE_VERSION: "22"
   PYTHON_VERSION: "3.11"
 
-# ── Job 1: Build PyInstaller CCTV bundle (Linux) ──────────────
 jobs:
-  build-python:
+  # ── Job 1: Build PyInstaller CCTV bundle (Linux) ──────────────
+  build-cctv-linux:
     name: Build CCTV Vision Bundle (Python 3.11)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up Python ${{ env.PYTHON_VERSION }}
-        uses: actions/setup-python@v5
+      - uses: actions/setup-python@v5
         with:
           python-version: ${{ env.PYTHON_VERSION }}
+          cache: "pip"
+          cache-dependency-path: "services/cctv-vision/requirements.txt"
 
-      - name: Install CCTV dependencies
-        run: |
-          cd services/cctv-vision
-          pip install --upgrade pip
-          pip install \
-            opencv-python-headless==4.10.0.84 \
-            mediapipe==0.10.14 \
-            numpy==1.26.4 \
-            "python-socketio[asyncio_client]==5.11.3" \
-            aiohttp==3.9.5 \
-            Pillow==10.4.0 \
-            python-dotenv==1.0.1 \
-            pyinstaller
+      - name: Install Linux OpenCV dependencies
+        run: sudo apt-get update && sudo apt-get install -y libgl1 libglib2.0-0
 
-      - name: Download MediaPipe face_landmarker model
-        run: |
-          mkdir -p services/cctv-vision/models
-          curl -fsSL \
-            "https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task" \
-            -o services/cctv-vision/models/face_landmarker.task
+      - name: Build Linux CCTV PyInstaller bundle
+        run: bash services/cctv-vision/build_bundle.sh
 
-      - name: Build PyInstaller bundle
-        run: |
-          cd services/cctv-vision
-          python -m PyInstaller cctv_vision.spec --clean --noconfirm
-          # Normalize output path: spec may put it in dist/ or dist-pyinstaller/
-          if [ -d "dist/cctv-vision" ] && [ ! -f "../../dist-pyinstaller/cctv-vision/cctv-vision" ]; then
-            mkdir -p ../../dist-pyinstaller/cctv-vision
-            cp -r dist/cctv-vision/. ../../dist-pyinstaller/cctv-vision/
-          fi
-          ls -lh ../../dist-pyinstaller/cctv-vision/ | head -5
+      - name: Archive CCTV bundle (tar.gz preserves +x permissions)
+        run: tar -czf cctv-vision-linux.tar.gz -C dist-pyinstaller cctv-vision
 
-      - name: Upload CCTV bundle artifact
-        uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v4
         with:
-          name: cctv-vision-linux
-          path: dist-pyinstaller/cctv-vision/
+          name: cctv-vision-linux-archive
+          path: cctv-vision-linux.tar.gz
           retention-days: 1
-          if-no-files-found: error
 
-# ── Job 2: Windows installer (.exe) ───────────────────────────
-  release-win:
+  # ── Job 2: Windows installers (.exe) ─────────────────────────
+  build-windows:
     name: Windows Installer (.exe)
-    needs: build-python
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
+      - uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
 
       - name: Enable Corepack (Yarn Berry)
         run: corepack enable
 
-      - name: Install Node dependencies
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: "pip"
+          cache-dependency-path: "services/cctv-vision/requirements.txt"
+
+      - name: Build Windows CCTV PyInstaller bundle
+        shell: pwsh
+        run: .\services\cctv-vision\build_bundle.ps1
+
+      - name: Install dependencies
         run: yarn install --immutable
 
       - name: Build shared package
@@ -105,75 +88,26 @@ jobs:
       - name: Generate Prisma client
         run: yarn workspace @secureassess/server db:generate
 
-      - name: Set up Python ${{ env.PYTHON_VERSION }}
-        uses: actions/setup-python@v5
-        with:
-          python-version: ${{ env.PYTHON_VERSION }}
-
-      - name: Install CCTV dependencies (Windows)
-        shell: pwsh
-        run: |
-          pip install --upgrade pip
-          pip install `
-            opencv-python==4.10.0.84 `
-            "python-socketio[asyncio_client]==5.11.3" `
-            aiohttp==3.9.5 `
-            Pillow==10.4.0 `
-            python-dotenv==1.0.1 `
-            numpy==1.26.4 `
-            pyinstaller
-          pip install mediapipe==0.10.14 --quiet 2>$null; if ($LASTEXITCODE -ne 0) { Write-Host "mediapipe not available on this platform, Haar fallback active" }
-
-      - name: Download MediaPipe model (Windows)
-        shell: pwsh
-        run: |
-          New-Item -ItemType Directory -Force -Path services/cctv-vision/models | Out-Null
-          $url  = "https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task"
-          $dest = "services/cctv-vision/models/face_landmarker.task"
-          if (-not (Test-Path $dest)) { Invoke-WebRequest -Uri $url -OutFile $dest }
-
-      - name: Build CCTV bundle (Windows)
-        shell: pwsh
-        run: |
-          cd services/cctv-vision
-          python -m PyInstaller cctv_vision.spec --clean --noconfirm
-          # Normalize output path
-          $src = "dist\cctv-vision"
-          $dst = "..\..\dist-pyinstaller\cctv-vision"
-          if ((Test-Path $src) -and (-not (Test-Path "$dst\cctv-vision.exe"))) {
-            New-Item -ItemType Directory -Force -Path $dst | Out-Null
-            Copy-Item "$src\*" $dst -Recurse -Force
-          }
-          if (Test-Path "$dst\cctv-vision.exe") {
-            $sz = [math]::Round((Get-Item "$dst\cctv-vision.exe").Length/1MB,1)
-            Write-Host "cctv-vision.exe: $sz MB"
-          } else { Write-Error "CCTV binary not found" }
-
-      - name: Compile Electron main processes
+      - name: Build app bundles
         run: |
           yarn workspace @secureassess/teacher-desktop tsc --project tsconfig.main.json
           yarn workspace @secureassess/student-kiosk   tsc --project tsconfig.main.json
-
-      - name: Build renderer bundles
-        run: |
           yarn workspace @secureassess/teacher-desktop vite build
           yarn workspace @secureassess/student-kiosk   vite build
 
-      - name: Package — Teacher Desktop (Windows)
+      - name: Package Teacher Desktop (Windows - no publish)
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           CSC_IDENTITY_AUTO_DISCOVERY: "false"
           ELECTRON_OVERRIDE_DIST_PATH: ${{ github.workspace }}/node_modules/electron/dist
-        run: yarn workspace @secureassess/teacher-desktop package:win
+        run: yarn workspace @secureassess/teacher-desktop electron-builder --config electron-builder.yml --win --publish never
 
-      - name: Package — Student Kiosk (Windows)
+      - name: Package Student Kiosk (Windows - no publish)
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           CSC_IDENTITY_AUTO_DISCOVERY: "false"
           ELECTRON_OVERRIDE_DIST_PATH: ${{ github.workspace }}/node_modules/electron/dist
-        run: yarn workspace @secureassess/student-kiosk package:win
+        run: yarn workspace @secureassess/student-kiosk electron-builder --config electron-builder.yml --win --publish never
 
-      - name: Upload Windows artifacts
+      - name: Upload Windows installer artifacts
         uses: actions/upload-artifact@v4
         with:
           name: windows-installers
@@ -183,33 +117,41 @@ jobs:
             apps/teacher-desktop/release/latest.yml
             apps/student-kiosk/release/*.exe
             apps/student-kiosk/release/*.exe.blockmap
-          retention-days: 7
           if-no-files-found: error
+          retention-days: 1
 
-# ── Job 3: Linux installers (.AppImage + .deb) ───────────────
-  release-linux:
+  # ── Job 3: Linux installers (.AppImage + .deb) ───────────────
+  build-linux:
     name: Linux Installers (.AppImage + .deb)
-    needs: build-python
+    needs: build-cctv-linux
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
+      - uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
 
       - name: Enable Corepack (Yarn Berry)
         run: corepack enable
 
-      - name: Install system dependencies
+      - name: Install Linux packaging libraries
         run: |
-          sudo apt-get update -q
-          sudo apt-get install -y --no-install-recommends \
-            libgtk-3-dev libnss3 libxss1 libxtst6 \
-            xvfb rpm fakeroot dpkg
+          sudo apt-get update
+          sudo apt-get install -y libgl1 libglib2.0-0 rpm libfuse2 \
+            libgtk-3-dev libnss3 libxss1 libxtst6 fakeroot dpkg
 
-      - name: Install Node dependencies
+      - uses: actions/download-artifact@v4
+        with:
+          name: cctv-vision-linux-archive
+
+      - name: Extract CCTV bundle with executable permissions intact
+        run: |
+          mkdir -p dist-pyinstaller
+          tar -xzf cctv-vision-linux.tar.gz -C dist-pyinstaller
+          chmod +x dist-pyinstaller/cctv-vision/cctv-vision
+
+      - name: Install dependencies
         run: yarn install --immutable
 
       - name: Build shared package
@@ -218,38 +160,24 @@ jobs:
       - name: Generate Prisma client
         run: yarn workspace @secureassess/server db:generate
 
-      - name: Download CCTV bundle artifact (Linux)
-        uses: actions/download-artifact@v4
-        with:
-          name: cctv-vision-linux
-          path: dist-pyinstaller/cctv-vision/
-
-      - name: Make CCTV binary executable
-        run: chmod +x dist-pyinstaller/cctv-vision/cctv-vision 2>/dev/null || true
-
-      - name: Compile Electron main processes
+      - name: Build app bundles
         run: |
           yarn workspace @secureassess/teacher-desktop tsc --project tsconfig.main.json
           yarn workspace @secureassess/student-kiosk   tsc --project tsconfig.main.json
-
-      - name: Build renderer bundles
-        run: |
           yarn workspace @secureassess/teacher-desktop vite build
           yarn workspace @secureassess/student-kiosk   vite build
 
-      - name: Package — Teacher Desktop (Linux)
+      - name: Package Teacher Desktop (Linux - no publish)
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           CSC_IDENTITY_AUTO_DISCOVERY: "false"
-        run: yarn workspace @secureassess/teacher-desktop package:linux
+        run: yarn workspace @secureassess/teacher-desktop electron-builder --config electron-builder.yml --linux --publish never
 
-      - name: Package — Student Kiosk (Linux)
+      - name: Package Student Kiosk (Linux - no publish)
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           CSC_IDENTITY_AUTO_DISCOVERY: "false"
-        run: yarn workspace @secureassess/student-kiosk package:linux
+        run: yarn workspace @secureassess/student-kiosk electron-builder --config electron-builder.yml --linux --publish never
 
-      - name: Upload Linux artifacts
+      - name: Upload Linux installer artifacts
         uses: actions/upload-artifact@v4
         with:
           name: linux-installers
@@ -259,59 +187,31 @@ jobs:
             apps/teacher-desktop/release/latest-linux.yml
             apps/student-kiosk/release/*.AppImage
             apps/student-kiosk/release/*.deb
-          retention-days: 7
           if-no-files-found: error
+          retention-days: 1
 
-# ── Job 4: Publish GitHub Release ─────────────────────────────
-  publish-release:
+  # ── Job 4: Publish GitHub Release ─────────────────────────────
+  publish:
     name: Publish GitHub Release
-    needs: [release-win, release-linux]
+    needs: [build-windows, build-linux]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-
-      - name: Download all installer artifacts
+      - name: Download Windows & Linux installers
         uses: actions/download-artifact@v4
         with:
-          path: release-assets/
-          merge-multiple: true
+          path: release-assets
 
-      - name: List release assets
-        run: find release-assets/ -type f | sort
-
-      - name: Create GitHub Release and upload assets
+      - name: Create GitHub Release & upload final installers
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ github.ref_name }}
           name: "SecureAssess ${{ github.ref_name }}"
-          body: |
-            ## SecureAssess ${{ github.ref_name }}
-
-            ### Downloads
-
-            | Platform | Installer | Notes |
-            |---|---|---|
-            | Windows | `SecureAssess Teacher Setup *.exe` | Teacher Console (NSIS, includes CCTV engine) |
-            | Windows | `SecureAssess Student Kiosk Setup *.exe` | Student Kiosk (silent, OS lockdown) |
-            | Linux | `SecureAssess Teacher-*.AppImage` | Teacher Console portable |
-            | Linux | `secureassess-teacher_*.deb` | Teacher Console Debian package |
-            | Linux | `SecureAssess Student Kiosk-*.AppImage` | Student Kiosk portable |
-
-            ### Auto-update
-            `latest.yml` and `latest-linux.yml` are attached for the `electron-updater` feed.
-            The Teacher Desktop checks this release page for updates automatically.
-
-            ### First-time setup
-            1. Install → open the Teacher Desktop
-            2. The first account you create becomes the **Lab Host** and sets the Faculty Registration PIN
-            3. All future teacher registrations require the PIN (prevents student self-registration)
-          draft: false
-          prerelease: false
+          generate_release_notes: true
+          overwrite_files: true
           files: |
-            release-assets/**/*.exe
-            release-assets/**/*.exe.blockmap
-            release-assets/**/*.AppImage
-            release-assets/**/*.deb
-            release-assets/**/latest.yml
-            release-assets/**/latest-linux.yml
-          token: ${{ secrets.GITHUB_TOKEN }}
+            release-assets/windows-installers/*.exe
+            release-assets/windows-installers/*.exe.blockmap
+            release-assets/windows-installers/latest.yml
+            release-assets/linux-installers/*.AppImage
+            release-assets/linux-installers/*.deb
+            release-assets/linux-installers/latest-linux.yml
