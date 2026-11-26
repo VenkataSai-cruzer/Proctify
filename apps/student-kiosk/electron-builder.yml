@@ -30,6 +30,9 @@ win:
     - target: nsis
       arch: [x64]
   icon: assets/icon.png
+  # No spaces: GitHub sanitizes spaces in uploaded asset names, so the
+  # default "<productName> Setup <version>.exe" became a dotted filename.
+  artifactName: "SecureAssess-Student-Kiosk-Setup-${version}.${ext}"
   verifyUpdateCodeSignature: false
   signAndEditExecutable: false
 
