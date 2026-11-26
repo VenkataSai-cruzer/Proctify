@@ -50,6 +50,9 @@ win:
     - target: nsis
       arch: [x64]
   icon: assets/icon.png
+  # No spaces: GitHub sanitizes spaces in uploaded asset names, which left
+  # latest.yml pointing at a filename that did not exist on the release.
+  artifactName: "SecureAssess-Teacher-Setup-${version}.${ext}"
   verifyUpdateCodeSignature: false
   signAndEditExecutable: false
 
